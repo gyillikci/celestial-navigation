@@ -90,6 +90,38 @@ def exp_gating(n_shots=12):
     return out
 
 
+def exp_horizon(n_shots=12):
+    ''' Horizon reference: IMU gravity vs optical ultrawide vs fused, FG+IMU. '''
+    out = {}
+    for r in REGIMES:
+        row = {}
+        for mode in ("imu", "uw", "fused"):
+            vals = [solve(build_scenario(r, random.Random(5000 + s),
+                                         n_shots=n_shots, horizon_mode=mode),
+                          use_imu=True)["rms_err_km"] for s in range(N_SEEDS)]
+            row[mode] = _mean_std(vals)
+        out[r] = row
+    return out
+
+
+def exp_horizon_budget():
+    ''' Horizon-reference sigma (arcmin) per regime at gated motion. '''
+    from .ultrawide_horizon import (horizon_reference_sigma_arcmin,
+                                    HORIZON_AVAILABLE, dip_arcmin)
+    rep = {"land": KinematicState(0.02, 0.03),
+           "sea": KinematicState(0.10, 0.20),
+           "air": KinematicState(0.05, 0.30)}
+    out = {}
+    for r in REGIMES:
+        st_ = rep[r]
+        out[r] = dict(
+            imu=horizon_reference_sigma_arcmin("imu", st_, r),
+            uw=horizon_reference_sigma_arcmin("uw", st_, r),
+            fused=horizon_reference_sigma_arcmin("fused", st_, r),
+            dip=dip_arcmin(r), available=HORIZON_AVAILABLE[r])
+    return out
+
+
 def exp_convergence(shot_counts=(4, 8, 12, 16, 20)):
     ''' RMS error vs number of shots, FG(IMU), gated. '''
     out = {r: {} for r in REGIMES}
@@ -182,6 +214,22 @@ def plot_gating(gating, path):
                   ("ungated (periodic shutter)",
                    {r: gating[r]["ungated"] for r in REGIMES}, COLORS["ungated"])],
                  "Least-rotation capture trigger (factor graph + IMU)",
+                 "RMS position error (km)")
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_horizon(hz, path):
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    _grouped_bar(ax, REGIMES,
+                 [("IMU gravity horizon",
+                   {r: hz[r]["imu"] for r in REGIMES}, "#edae49"),
+                  ("ultrawide optical horizon",
+                   {r: hz[r]["uw"] for r in REGIMES}, "#00798c"),
+                  ("fused (IMU + ultrawide)",
+                   {r: hz[r]["fused"] for r in REGIMES}, "#3ddc97")],
+                 "Optical horizon from the ultrawide camera rescues sea & air",
                  "RMS position error (km)")
     fig.tight_layout()
     fig.savefig(path, dpi=130)
@@ -290,9 +338,18 @@ def write_results_md(data, path):
     L.append("3. **The least-rotation shutter clearly helps on land and in the "
              "air** (≈2× lower error) by cutting the per-shot horizon noise "
              "3–6×. **At sea it is a wash** — even the calmest swell instant is "
-             "too tilted, so a handheld phone needs a gimbal/mount there; the "
-             "swell floor, not the shutter, dominates.\n")
-    L.append("4. **Geometry matters:** the fix is well-conditioned only when "
+             "too tilted, so the IMU gravity horizon alone is not enough there.\n")
+    hz = data["horizon"]
+    L.append(f"4. **The ultrawide camera fixes the sea (and air) problem.** "
+             f"Shooting the ultrawide horizon at the same instant as the tele "
+             f"body gives an *optical* horizon that is immune to acceleration. "
+             f"It drops the sea fix from {hz['sea']['imu'][0]:.0f} km to "
+             f"**{hz['sea']['fused'][0]:.1f} km** and the air fix from "
+             f"{hz['air']['imu'][0]:.0f} km to **{hz['air']['fused'][0]:.1f} "
+             f"km** — bringing the moving platforms to land-class accuracy. "
+             f"On land there is no true sea horizon, so it falls back to the "
+             f"IMU (no change).\n")
+    L.append("5. **Geometry matters:** the fix is well-conditioned only when "
              "the Sun and Moon are well separated in azimuth (~90° here, a "
              "first-quarter Moon); near-parallel lines of position degrade it.\n")
     L.append("## 1. Factor graph vs. the incumbent single-fix\n")
@@ -318,11 +375,32 @@ def write_results_md(data, path):
         L.append(f"| {REGIME_LABEL[r]} | {cell(g[r]['gated'])} | "
                  f"{cell(g[r]['ungated'])} |")
     L.append("\n![gating](results/fig_gating.png)\n")
-    L.append("## 3. Error vs. number of fused shots\n")
+    L.append("## 3. Optical horizon from the ultrawide camera\n")
+    L.append("The ultrawide and tele lenses fire together: the tele resolves the "
+             "body, the ultrawide sees the visible horizon line. Fitting that "
+             "line gives an *optical* local-vertical that — unlike the "
+             "accelerometer — is not fooled by linear acceleration. Modelled "
+             "horizon-reference noise at gated motion (arc-minutes):\n")
+    hb = data["horizon_budget"]
+    L.append("| Regime | IMU gravity | ultrawide optical | fused | dip corrected |")
+    L.append("|---|---|---|---|---|")
+    for r in REGIMES:
+        avail = "" if hb[r]["available"] else " *(no true horizon → n/a)*"
+        uw = f"{hb[r]['uw']:.1f}′{avail}"
+        L.append(f"| {REGIME_LABEL[r]} | {hb[r]['imu']:.1f}′ | {uw} | "
+                 f"{hb[r]['fused']:.1f}′ | {hb[r]['dip']:.0f}′ |")
+    L.append("\nResulting position error (factor graph + IMU, gated):\n")
+    L.append("| Regime | IMU horizon | ultrawide horizon | **fused** |")
+    L.append("|---|---|---|---|")
+    for r in REGIMES:
+        L.append(f"| {REGIME_LABEL[r]} | {cell(hz[r]['imu'])} | "
+                 f"{cell(hz[r]['uw'])} | **{cell(hz[r]['fused'])}** |")
+    L.append("\n![horizon](results/fig_horizon.png)\n")
+    L.append("## 4. Error vs. number of fused shots\n")
     L.append("![convergence](results/fig_convergence.png)\n")
-    L.append("## 4. The trigger in action\n")
+    L.append("## 5. The trigger in action\n")
     L.append("![trigger](results/fig_trigger.png)\n")
-    L.append("## 5. Fix with covariance (error ellipse)\n")
+    L.append("## 6. Fix with covariance (error ellipse)\n")
     L.append("![ellipse](results/fig_ellipse.png)\n")
     L.append("## Model assumptions\n")
     L.append("- Representative phone-class MEMS IMU and periscope tele camera "
@@ -359,10 +437,19 @@ def write_dashboard(data, path):
                 f"<td>{cell(g[r]['gated'])}</td>"
                 f"<td>{cell(g[r]['ungated'])}</td></tr>")
 
+    hz = data["horizon"]
+
+    def hrow(r):
+        return (f"<tr><td>{REGIME_LABEL[r]}</td>"
+                f"<td>{cell(hz[r]['imu'])}</td>"
+                f"<td>{cell(hz[r]['uw'])}</td>"
+                f"<td class='hi'>{cell(hz[r]['fused'])}</td></tr>")
+
     imgs = "".join(
         f"<figure><img src='results/{fn}'><figcaption>{cap}</figcaption></figure>"
         for fn, cap in [
             ("fig_main.png", "Factor graph vs incumbent single-fix"),
+            ("fig_horizon.png", "Ultrawide optical horizon rescues sea & air"),
             ("fig_gating.png", "Least-rotation shutter"),
             ("fig_convergence.png", "Error vs number of shots"),
             ("fig_trigger.png", "Trigger picking calm instants"),
@@ -404,6 +491,17 @@ padding:.05rem .5rem;font-size:.8rem;margin-right:.3rem}}
 </div>
 
 <div class='card'>
+<h2>Ultrawide optical horizon — the sea &amp; air fix</h2>
+<p>Firing the ultrawide lens with the tele gives an <em>optical</em> horizon,
+immune to the acceleration that corrupts the IMU gravity horizon. It brings the
+moving platforms to land-class accuracy; on land (no true sea horizon) it falls
+back to the IMU.</p>
+<table><tr><th>Regime</th><th>IMU horizon</th><th>ultrawide horizon</th>
+<th>fused</th></tr>
+{hrow('land')}{hrow('sea')}{hrow('air')}</table>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
@@ -434,6 +532,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     print("Running experiments (this takes a few minutes)…")
     data = dict(main=exp_main(), gating=exp_gating(),
+                horizon=exp_horizon(), horizon_budget=exp_horizon_budget(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)
@@ -441,6 +540,7 @@ def main():
     print("Plotting…")
     plot_main(data["main"], os.path.join(OUT, "fig_main.png"))
     plot_gating(data["gating"], os.path.join(OUT, "fig_gating.png"))
+    plot_horizon(data["horizon"], os.path.join(OUT, "fig_horizon.png"))
     plot_convergence(data["convergence"], os.path.join(OUT, "fig_convergence.png"))
     plot_trigger(os.path.join(OUT, "fig_trigger.png"))
     plot_ellipse(os.path.join(OUT, "fig_ellipse.png"))

@@ -28,7 +28,9 @@ from starfix import LatLonGeocentric
 from .astro import body_gp, altaz, enu_to_latlon, latlon_to_enu
 from .iphone_model import (IphoneImuSpec, TeleCameraSpec, KinematicState,
                            DEFAULT_IMU, DEFAULT_CAM, G0,
-                           altitude_sigma_arcmin, heading_sigma_arcmin)
+                           heading_sigma_arcmin)
+from .ultrawide_horizon import (UltrawideHorizonSpec, DEFAULT_UW,
+                                horizon_reference_sigma_arcmin)
 from .capture_trigger import PROFILES, simulate_trace, find_shutter_instants
 
 # Canonical daytime epoch.  Greenwich (the home of longitude) near local noon,
@@ -120,7 +122,9 @@ def build_scenario(regime: str,
                    use_azimuth: bool = False,
                    noise_scale: float = 1.0,
                    dr_error_km: float = 30.0,
-                   dr_bearing_deg: float = 60.0) -> Scenario:
+                   dr_bearing_deg: float = 60.0,
+                   horizon_mode: str = "imu",
+                   uw: UltrawideHorizonSpec = DEFAULT_UW) -> Scenario:
     ''' Generate a full scenario: trajectory, true geometry, noisy measurements
         and IMU stream.
 
@@ -160,10 +164,15 @@ def build_scenario(regime: str,
                       true_lat=lat, true_lon=lon,
                       true_east=east, true_north=north)
 
+        # Horizon reference sigma for THIS shot: IMU gravity, optical ultrawide
+        # horizon, or their fusion.  The tele-camera pointing error adds in
+        # quadrature to give the altitude measurement sigma.
+        href = horizon_reference_sigma_arcmin(horizon_mode, kin, regime,
+                                              imu, uw)
+        a_sig = (cam.pointing_sigma_arcmin() ** 2 + href ** 2) ** 0.5
         for body in bodies:
             gp = body_gp(body, iso)
             t_alt, t_az = altaz(lat, lon, gp)
-            a_sig = altitude_sigma_arcmin(kin, imu, cam)
             h_sig = heading_sigma_arcmin(kin, imu)
             meas_alt = t_alt + noise_scale * rng.gauss(0.0, a_sig / 60.0)
             meas_az = (t_az + noise_scale * rng.gauss(0.0, h_sig / 60.0)

@@ -35,6 +35,17 @@ padding:.05rem .5rem;font-size:.8rem;margin-right:.3rem}
 </div>
 
 <div class='card'>
+<h2>Ultrawide optical horizon — the sea &amp; air fix</h2>
+<p>Firing the ultrawide lens with the tele gives an <em>optical</em> horizon,
+immune to the acceleration that corrupts the IMU gravity horizon. It brings the
+moving platforms to land-class accuracy; on land (no true sea horizon) it falls
+back to the IMU.</p>
+<table><tr><th>Regime</th><th>IMU horizon</th><th>ultrawide horizon</th>
+<th>fused</th></tr>
+<tr><td>Land (stationary)</td><td>4.2 ± 2.3</td><td>4.2 ± 2.3</td><td class='hi'>4.2 ± 2.3</td></tr><tr><td>Sea (vessel + swell)</td><td>26.6 ± 15.8</td><td>2.0 ± 1.1</td><td class='hi'>2.0 ± 1.1</td></tr><tr><td>Air (aircraft)</td><td>8.7 ± 4.8</td><td>2.3 ± 1.3</td><td class='hi'>2.2 ± 1.2</td></tr></table>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
@@ -45,7 +56,7 @@ dominates and a gimbal/mount is needed.</p>
 <tr><td>Land (stationary)</td><td>6.4′</td><td>18.1′</td><td>5.7 ± 2.4</td><td>7.7 ± 4.8</td></tr><tr><td>Sea (vessel + swell)</td><td>95.9′</td><td>402.6′</td><td>26.2 ± 14.5</td><td>23.1 ± 12.5</td></tr><tr><td>Air (aircraft)</td><td>22.2′</td><td>138.3′</td><td>8.6 ± 3.1</td><td>16.4 ± 9.6</td></tr></table>
 </div>
 
-<div class='card'><h2>Figures</h2><figure><img src='results/fig_main.png'><figcaption>Factor graph vs incumbent single-fix</figcaption></figure><figure><img src='results/fig_gating.png'><figcaption>Least-rotation shutter</figcaption></figure><figure><img src='results/fig_convergence.png'><figcaption>Error vs number of shots</figcaption></figure><figure><img src='results/fig_trigger.png'><figcaption>Trigger picking calm instants</figcaption></figure><figure><img src='results/fig_ellipse.png'><figcaption>Fix with covariance ellipse</figcaption></figure></div>
+<div class='card'><h2>Figures</h2><figure><img src='results/fig_main.png'><figcaption>Factor graph vs incumbent single-fix</figcaption></figure><figure><img src='results/fig_horizon.png'><figcaption>Ultrawide optical horizon rescues sea & air</figcaption></figure><figure><img src='results/fig_gating.png'><figcaption>Least-rotation shutter</figcaption></figure><figure><img src='results/fig_convergence.png'><figcaption>Error vs number of shots</figcaption></figure><figure><img src='results/fig_trigger.png'><figcaption>Trigger picking calm instants</figcaption></figure><figure><img src='results/fig_ellipse.png'><figcaption>Fix with covariance ellipse</figcaption></figure></div>
 
 <div class='card'><h2>How it works</h2>
 <p>The phone is a digital theodolite: its IMU gives the local vertical (a

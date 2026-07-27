@@ -35,6 +35,7 @@ instants (local minima of |ω|) to keep each IMU-photo pair clean.
 |---|---|
 | `astro.py` | Body geographic position + predicted altitude/azimuth. Reuses `starfix`'s real Sun/Moon ephemeris. Local ENU ↔ lat/lon. |
 | `iphone_model.py` | Representative iPhone-class IMU + tele-camera noise; how motion corrupts the gravity horizon. |
+| `ultrawide_horizon.py` | Optical horizon from the ultrawide lens (fired with the tele): an acceleration-immune tilt reference, fused with the IMU. Reuses `starfix.get_dip_of_horizon`. |
 | `capture_trigger.py` | Per-regime hand/platform disturbance model and the least-rotation "smart shutter" (gated vs. periodic). |
 | `scenario.py` | Sea/land/air ground truth from the ephemeris + noisy Sun+Moon measurements + IMU stream. |
 | `celestial_factor_graph.py` | GTSAM graph: celestial altitude `CustomFactor` per sight, `ImuFactor` between shots, priors, LM solve, `Marginals` covariance. |
@@ -70,7 +71,19 @@ tables and figures.
 - Fusing many Sun+Moon shots with IMU cuts error **4–10×** vs a single fix.
 - The **least-rotation shutter** cuts per-shot horizon noise 3–6× → ≈2× lower
   fix error **on land and in the air**; **at sea it is a wash** (even the
-  calmest swell instant is too tilted — a gimbal/mount is needed there).
+  calmest swell instant is too tilted for the IMU gravity horizon alone).
+- **The ultrawide camera's optical horizon** (captured simultaneously with the
+  tele body shot) is immune to acceleration and **rescues the moving
+  platforms**: sea **~27 km → ~2 km**, air **~9 km → ~2 km**, bringing them to
+  land-class accuracy. On land there is no true sea horizon, so it falls back to
+  the IMU.
+
+  | Regime | IMU horizon | ultrawide horizon | **fused** |
+  |---|---|---|---|
+  | Land | ~4 km | ~4 km (n/a) | **~4 km** |
+  | Sea | ~27 km | ~2 km | **~2 km** |
+  | Air | ~9 km | ~2 km | **~2 km** |
+
 - Accuracy tracks **azimuth separation** of the two bodies (best near 90°).
 
 ## Modelling assumptions & honest limitations

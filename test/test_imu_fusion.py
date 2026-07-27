@@ -89,6 +89,26 @@ class TestImuFusion(unittest.TestCase):
         daz = abs(((sun_az - moon_az + 180) % 360) - 180)
         self.assertGreater(daz, 60)             # well-conditioned fix
 
+    def test_ultrawide_horizon_rescues_sea(self):
+        ''' The optical ultrawide horizon (immune to swell acceleration) gives a
+            much better sea fix than the IMU gravity horizon. '''
+        sea_imu = solve(build_scenario("sea", random.Random(5), n_shots=12,
+                                       horizon_mode="imu"), use_imu=True)
+        sea_uw = solve(build_scenario("sea", random.Random(5), n_shots=12,
+                                      horizon_mode="fused"), use_imu=True)
+        self.assertLess(sea_uw["rms_err_km"], 0.5 * sea_imu["rms_err_km"])
+
+    def test_ultrawide_horizon_unavailable_on_land(self):
+        ''' Land has no true sea horizon, so the optical mode must fall back to
+            the IMU and change nothing. '''
+        from imu_fusion.ultrawide_horizon import (HORIZON_AVAILABLE,
+                                                  horizon_reference_sigma_arcmin)
+        self.assertFalse(HORIZON_AVAILABLE["land"])
+        st = KinematicState(ang_rate=0.03, lin_accel=0.05)
+        s_imu = horizon_reference_sigma_arcmin("imu", st, "land")
+        s_uw = horizon_reference_sigma_arcmin("uw", st, "land")
+        self.assertAlmostEqual(s_imu, s_uw, places=6)
+
     def test_starfix_baseline_runs(self):
         ''' The starfix single-fix baseline produces a finite error. '''
         sc = build_scenario("land", random.Random(4), n_shots=4)
