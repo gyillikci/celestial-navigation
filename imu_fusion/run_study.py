@@ -151,6 +151,30 @@ def exp_optical(n_shots=12, horizon_mode="imu"):
     return out
 
 
+def exp_fullstack(n_shots=12):
+    ''' The deployed configuration: best horizon (ultrawide fused) with ALL
+        sensors stacked -- vs the horizon alone -- to show the optical disk adds
+        on top of a good horizon (and to explain that the larger numbers in the
+        optical section are the weak-IMU-horizon isolation baseline, not a
+        regression). '''
+    out = {}
+    for r in REGIMES:
+        horizon_only = [solve(build_scenario(r, random.Random(7000 + s),
+                                             n_shots=n_shots,
+                                             horizon_mode="fused"),
+                              use_imu=True)["rms_err_km"] for s in range(N_SEEDS)]
+        full = [solve(build_scenario(r, random.Random(7000 + s), n_shots=n_shots,
+                                     horizon_mode="fused", use_azimuth=True,
+                                     heading_source="optical",
+                                     use_parallactic=True, sun_spots=True),
+                      use_imu=True, use_azimuth=True,
+                      use_parallactic=True)["rms_err_km"]
+                for s in range(N_SEEDS)]
+        out[r] = dict(horizon_only=_mean_std(horizon_only),
+                      full_stack=_mean_std(full))
+    return out
+
+
 def exp_heading_budget():
     ''' Heading sigma (deg): magnetometer vs optical disk orientation. '''
     from .optical_attitude import optical_heading_sigma_deg
@@ -499,9 +523,23 @@ def write_results_md(data, path):
              "magnetometer, which is what makes the azimuth lines of position "
              "usable; combined with the parallactic line it materially improves "
              "the fix when the horizon is weak (e.g. sea on the IMU horizon). "
-             "The Sun's P-angle needs a solar filter and visible spots, so the "
+             "The Sun's P-angle needs a solar filter and visible spots (matched "
+             "to an observatory reference taken just before the journey), so the "
              "Moon's bright limb is the workhorse.\n")
     L.append("\n![optical](results/fig_optical.png)\n")
+    fs = data["fullstack"]
+    L.append("> **Why the numbers above are larger than §3.** This section runs "
+             "the optical disk on the *weak IMU horizon* on purpose, to isolate "
+             "its contribution. It is not a regression versus the ~2 km ultrawide "
+             "horizon — the two use different horizon baselines. Stacking "
+             "*everything* (ultrawide fused horizon **and** the optical disk, "
+             "Moon + Sun) gives the deployed accuracy below:\n")
+    L.append("| Regime | ultrawide horizon only | **full stack (horizon + optical)** |")
+    L.append("|---|---|---|")
+    for r in REGIMES:
+        L.append(f"| {REGIME_LABEL[r]} | {cell(fs[r]['horizon_only'])} | "
+                 f"**{cell(fs[r]['full_stack'])}** |")
+    L.append("")
     L.append("## 5. Error vs. number of fused shots\n")
     L.append("![convergence](results/fig_convergence.png)\n")
     L.append("## 6. The trigger in action\n")
@@ -551,7 +589,12 @@ def write_dashboard(data, path):
                 f"<td>{cell(hz[r]['uw'])}</td>"
                 f"<td class='hi'>{cell(hz[r]['fused'])}</td></tr>")
 
-    op, hdb = data["optical"], data["heading_budget"]
+    op, hdb, fs = data["optical"], data["heading_budget"], data["fullstack"]
+
+    def fsrow(r):
+        return (f"<tr><td>{REGIME_LABEL[r]}</td>"
+                f"<td>{cell(fs[r]['horizon_only'])}</td>"
+                f"<td class='hi'>{cell(fs[r]['full_stack'])}</td></tr>")
 
     def orow(r):
         return (f"<tr><td>{REGIME_LABEL[r]}</td>"
@@ -587,6 +630,7 @@ h2{{font-size:1.15rem;border-left:4px solid var(--acc);padding-left:.6rem}}
 table{{width:100%;border-collapse:collapse;margin:.4rem 0;font-size:.93rem}}
 th,td{{padding:.5rem .6rem;text-align:left;border-bottom:1px solid rgba(128,128,128,.2)}}
 th{{color:var(--mut);font-weight:600}}td.hi{{color:var(--hi);font-weight:700}}
+.note{{color:var(--mut);font-size:.88rem;margin:.7rem 0 .3rem}}.note b{{color:var(--fg)}}
 figure{{margin:1rem 0}}img{{width:100%;border-radius:10px;background:#fff}}
 figcaption{{color:var(--mut);font-size:.85rem;margin-top:.3rem}}
 .grid{{display:grid;grid-template-columns:1fr 1fr;gap:1rem}}
@@ -628,6 +672,13 @@ visible; the Moon's limb is the workhorse (the Sun needs a filter and spots).</p
 <table><tr><th>Regime</th><th>heading σ (mag / optical)</th><th>alt only</th>
 <th>+az (mag)</th><th>+az (optical)</th><th>+optical &amp; parallactic</th></tr>
 {orow('land')}{orow('sea')}{orow('air')}</table>
+<p class="note"><b>These numbers use the weak IMU horizon on purpose</b>, to
+isolate the optical-disk contribution — not a regression versus the ~2&nbsp;km
+ultrawide horizon. Stacking <em>everything</em> (ultrawide horizon + optical
+disk, Moon&nbsp;+&nbsp;Sun) gives the deployed accuracy:</p>
+<table><tr><th>Regime</th><th>ultrawide horizon only</th>
+<th>full stack (horizon + optical)</th></tr>
+{fsrow('land')}{fsrow('sea')}{fsrow('air')}</table>
 </div>
 
 <div class='card'>
@@ -663,6 +714,7 @@ def main():
     data = dict(main=exp_main(), gating=exp_gating(),
                 horizon=exp_horizon(), horizon_budget=exp_horizon_budget(),
                 optical=exp_optical(), heading_budget=exp_heading_budget(),
+                fullstack=exp_fullstack(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)

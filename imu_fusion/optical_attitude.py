@@ -10,6 +10,15 @@
         the tabulated P / B0 angles, fixes the solar rotation axis's position
         angle P (ephemeris).
 
+    Sunspot reference (deployment).  In practice the Sun's disk orientation is
+    read through a solar filter by matching the live sunspot pattern to a
+    REFERENCE image taken from an observatory just before the journey.  Over a
+    short trip with a fresh reference the pattern is a stable fiducial, so the
+    Sun's differential rotation is ignored here (set `sun_spots=True` in the
+    scenario to use it).  Its value is mainly redundancy: it carries the heading
+    when the Moon is near full or not visible, and gives a stronger parallactic
+    line when the Sun is well off the meridian.
+
     Measured against the gravity vertical in the image, the feature axis gives
 
         theta_image = PA_ephemeris - q                                   (1)

@@ -86,10 +86,18 @@ Position error (factor graph + IMU, gated, **IMU horizon** so the optical gain i
 | Sea (vessel + swell) | 28.6 ± 15.8 | 17.4 ± 11.0 | 14.9 ± 6.4 | **12.4 ± 6.2** |
 | Air (aircraft) | 12.0 ± 6.0 | 8.4 ± 5.4 | 8.1 ± 5.5 | **5.2 ± 2.4** |
 
-The optical disk gives a heading several times better than the magnetometer, which is what makes the azimuth lines of position usable; combined with the parallactic line it materially improves the fix when the horizon is weak (e.g. sea on the IMU horizon). The Sun's P-angle needs a solar filter and visible spots, so the Moon's bright limb is the workhorse.
+The optical disk gives a heading several times better than the magnetometer, which is what makes the azimuth lines of position usable; combined with the parallactic line it materially improves the fix when the horizon is weak (e.g. sea on the IMU horizon). The Sun's P-angle needs a solar filter and visible spots (matched to an observatory reference taken just before the journey), so the Moon's bright limb is the workhorse.
 
 
 ![optical](results/fig_optical.png)
+
+> **Why the numbers above are larger than §3.** This section runs the optical disk on the *weak IMU horizon* on purpose, to isolate its contribution. It is not a regression versus the ~2 km ultrawide horizon — the two use different horizon baselines. Stacking *everything* (ultrawide fused horizon **and** the optical disk, Moon + Sun) gives the deployed accuracy below:
+
+| Regime | ultrawide horizon only | **full stack (horizon + optical)** |
+|---|---|---|
+| Land (stationary) | 5.2 ± 2.2 | **4.1 ± 2.1** |
+| Sea (vessel + swell) | 2.7 ± 1.2 | **2.5 ± 1.1** |
+| Air (aircraft) | 2.8 ± 1.2 | **2.6 ± 1.0** |
 
 ## 5. Error vs. number of fused shots
 
