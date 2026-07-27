@@ -171,18 +171,37 @@ class TestImuFusion(unittest.TestCase):
                               **full_sv)["rms_err_km"], 0.5)
 
     def test_ablation_ultrawide_matters_at_sea(self):
-        ''' Removing the ultrawide horizon from the full fusion must hurt the
-            sea fix (it is the sea's dominant observable). '''
-        full_sc = dict(horizon_mode="fused", use_azimuth=True,
-                       heading_source="optical", use_parallactic=True,
-                       sun_spots=True)
-        full_sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
-        full = solve(build_scenario("sea", random.Random(11), n_shots=12,
-                                    **full_sc), **full_sv)["rms_err_km"]
-        no_uw = solve(build_scenario("sea", random.Random(11), n_shots=12,
-                                     **{**full_sc, "horizon_mode": "imu"}),
-                      **full_sv)["rms_err_km"]
+        ''' Without a horizon-free surface-feature anchor, the ultrawide optical
+            horizon is the sea's dominant vertical reference, so removing it must
+            hurt.  (WITH resolved sunspots/craters the horizon-free parallactic
+            substitutes and the ultrawide becomes marginal -- exercised in
+            test_sunspot_anchor_makes_horizon_redundant.) '''
+        base = dict(use_azimuth=True, heading_source="magnetometer",
+                    use_parallactic=False, sun_spots=False)
+        sv = dict(use_imu=True, use_azimuth=True, use_parallactic=False)
+        full = sum(solve(build_scenario("sea", random.Random(11 + s), n_shots=12,
+                                        horizon_mode="fused", **base),
+                         **sv)["rms_err_km"] for s in range(4)) / 4
+        no_uw = sum(solve(build_scenario("sea", random.Random(11 + s), n_shots=12,
+                                         horizon_mode="imu", **base),
+                          **sv)["rms_err_km"] for s in range(4)) / 4
         self.assertLess(full, no_uw)
+
+    def test_sunspot_anchor_makes_horizon_redundant(self):
+        ''' The payoff of a sharp horizon-free surface-feature attitude: with
+            sunspots/craters resolved, losing the ultrawide optical horizon at
+            sea barely hurts (the parallactic + anchored IMU vertical carry it),
+            whereas without them it is the dominant observable. '''
+        sc = dict(use_azimuth=True, heading_source="optical",
+                  use_parallactic=True, sun_spots=True, imu_anchor=True)
+        sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+        full = sum(solve(build_scenario("sea", random.Random(100 + s), n_shots=12,
+                                        horizon_mode="fused", **sc),
+                         **sv)["rms_err_km"] for s in range(4)) / 4
+        no_uw = sum(solve(build_scenario("sea", random.Random(100 + s), n_shots=12,
+                                         horizon_mode="imu", **sc),
+                          **sv)["rms_err_km"] for s in range(4)) / 4
+        self.assertLess(abs(no_uw - full), 0.5)        # ultrawide now marginal
 
     def test_analytic_altitude_jacobian(self):
         ''' The closed-form altitude Jacobian matches central finite diff. '''
@@ -266,10 +285,12 @@ class TestImuFusion(unittest.TestCase):
         self.assertEqual(best_horizon_lens(20, "sea").name, "wide")
         self.assertEqual(best_horizon_lens(40, "sea").name, "ultrawide")
         self.assertIsNone(best_horizon_lens(60, "sea"))       # IMU only
+        # Isolate the horizon-LENS dependence with no horizon-free surface-feature
+        # rescue (no sunspots/parallactic), so the optical horizon is the vertical.
         full = dict(horizon_mode="fused", use_azimuth=True,
-                    heading_source="optical", use_parallactic=True,
-                    sun_spots=True)
-        sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+                    heading_source="magnetometer", use_parallactic=False,
+                    sun_spots=False)
+        sv = dict(use_imu=True, use_azimuth=True, use_parallactic=False)
 
         def mean_rms(lens):
             return sum(solve(build_scenario("sea", random.Random(40 + s),
@@ -277,10 +298,7 @@ class TestImuFusion(unittest.TestCase):
                                             **full), **sv)["rms_err_km"]
                        for s in range(4)) / 4.0
         wide, adap, uw = mean_rms("wide"), mean_rms("adaptive"), mean_rms("ultrawide")
-        # Wide-only loses the optical horizon at altitude, but the horizon-free
-        # sunspot/crater parallactic softens the penalty, so it is worse than the
-        # adaptive lens but no longer 2x worse.
-        self.assertGreater(wide, 1.25 * adap)
+        self.assertGreater(wide, 1.4 * adap)    # wide-only loses the horizon
         self.assertAlmostEqual(adap, uw, delta=0.3)
 
     def test_visual_anchor_bounds_drift_and_is_motion_immune(self):
@@ -431,12 +449,12 @@ class TestImuFusion(unittest.TestCase):
         s_pat = parallactic_sigma_deg("Moon", st, 600.0, pattern_roll=True)
         s_nohorizon = parallactic_sigma_deg("Moon", st, 600.0, pattern_roll=False)
         self.assertLess(s_pat, s_nohorizon)
-        self.assertLess(s_pat, 1.0)                    # sub-degree, horizon-free
-        self.assertAlmostEqual(CRATER_ROLL_SIGMA_DEG, 0.3, places=6)
+        self.assertLess(s_pat, 0.5)                    # sub-degree, horizon-free
+        self.assertLess(CRATER_ROLL_SIGMA_DEG, 0.15)   # measured ~0.06 deg
         # Sun with a resolved sunspot pattern also gives a horizon-free roll
         s_sun = parallactic_sigma_deg("Sun", st, 600.0, pattern_roll=True)
-        self.assertLess(s_sun, 1.0)
-        self.assertAlmostEqual(SUN_SPOT_ROLL_SIGMA_DEG, 0.2, places=6)
+        self.assertLess(s_sun, 0.5)
+        self.assertLess(SUN_SPOT_ROLL_SIGMA_DEG, 0.15)  # measured ~0.09 deg
 
     def test_elongation_budget(self):
         ''' Elongation is a strong TIME/longitude observable (dE/dt ~0.5 deg/hr)

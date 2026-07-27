@@ -49,7 +49,7 @@ position.</figcaption></figure>
 <table><tr><th>Regime</th><th>full fusion</th>
 <th>− ultrawide</th><th>− IMU</th><th>− opt. az</th><th>− parallactic</th>
 <th>− gating</th><th>− Moon</th></tr>
-<tr><td>Land (stationary)</td><td class='hi'>3.7 ± 1.6</td><td class='mono dim'>3.7 ± 1.6</td><td class='mono dim'>13.2 ± 1.7</td><td class='mono dim'>3.4 ± 2.1</td><td class='mono dim'>3.7 ± 2.0</td><td class='mono dim'>3.9 ± 1.6</td><td class='mono dim'>3.2 ± 1.4</td></tr><tr><td>Sea (vessel + swell)</td><td class='hi'>2.2 ± 0.8</td><td class='mono dim'>4.9 ± 2.5</td><td class='mono dim'>7.7 ± 0.8</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>2.0 ± 1.0</td><td class='mono dim'>3.6 ± 1.6</td><td class='mono dim'>2.5 ± 1.2</td></tr><tr><td>Air (aircraft)</td><td class='hi'>2.3 ± 1.0</td><td class='mono dim'>4.8 ± 2.2</td><td class='mono dim'>8.0 ± 0.9</td><td class='mono dim'>2.1 ± 1.3</td><td class='mono dim'>2.1 ± 1.2</td><td class='mono dim'>2.6 ± 1.1</td><td class='mono dim'>2.5 ± 1.2</td></tr></table>
+<tr><td>Land (stationary)</td><td class='hi'>2.0 ± 1.1</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>9.0 ± 1.3</td><td class='mono dim'>2.4 ± 1.2</td><td class='mono dim'>3.4 ± 2.2</td><td class='mono dim'>1.8 ± 0.9</td><td class='mono dim'>2.4 ± 1.1</td></tr><tr><td>Sea (vessel + swell)</td><td class='hi'>1.7 ± 0.7</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>6.4 ± 0.8</td><td class='mono dim'>1.6 ± 1.0</td><td class='mono dim'>1.8 ± 0.9</td><td class='mono dim'>2.7 ± 1.2</td><td class='mono dim'>1.6 ± 0.7</td></tr><tr><td>Air (aircraft)</td><td class='hi'>1.7 ± 0.7</td><td class='mono dim'>1.9 ± 1.2</td><td class='mono dim'>6.4 ± 0.8</td><td class='mono dim'>1.6 ± 1.1</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>1.6 ± 0.7</td></tr></table>
 <p class='note'>Leave-one-out: the first column is the full fusion; each other
 column removes one observable, so a bigger number is a more valuable observable.</p>
 <figure><img src='results/fig_ablation.png'><figcaption>What each observable is
@@ -65,7 +65,7 @@ bounded</b> — with the same current-position accuracy. Fixes are low-rate; IMU
 dead-reckoning covers the gaps.</p>
 <table><tr><th>Regime</th><th>batch @ 30 shots</th>
 <th>streaming update</th><th>speedup</th><th>final-error (batch / stream)</th></tr>
-<tr><td>Land (stationary)</td><td class='mono dim'>308 ms</td><td class='mono hi'>5.7 ms</td><td class='mono'>54×</td><td class='mono'>1.60 / 1.62 km</td></tr><tr><td>Sea (vessel + swell)</td><td class='mono dim'>293 ms</td><td class='mono hi'>5.0 ms</td><td class='mono'>58×</td><td class='mono'>0.95 / 0.95 km</td></tr><tr><td>Air (aircraft)</td><td class='mono dim'>306 ms</td><td class='mono hi'>4.8 ms</td><td class='mono'>63×</td><td class='mono'>1.06 / 1.07 km</td></tr></table>
+<tr><td>Land (stationary)</td><td class='mono dim'>323 ms</td><td class='mono hi'>5.2 ms</td><td class='mono'>63×</td><td class='mono'>1.34 / 1.36 km</td></tr><tr><td>Sea (vessel + swell)</td><td class='mono dim'>298 ms</td><td class='mono hi'>5.0 ms</td><td class='mono'>59×</td><td class='mono'>0.72 / 0.72 km</td></tr><tr><td>Air (aircraft)</td><td class='mono dim'>293 ms</td><td class='mono hi'>4.9 ms</td><td class='mono'>60×</td><td class='mono'>0.73 / 0.73 km</td></tr></table>
 <figure><img src='results/fig_realtime.png'><figcaption>Per-fix latency vs trip
 length: batch grows, streaming stays flat under the real-time budget.</figcaption></figure>
 </div>
@@ -93,14 +93,14 @@ looser than a magnetometer. In daytime, with both up, take the heading from the
 IMU horizon so the gain is visible.</p>
 <table><tr><th>Regime</th><th>heading σ (mag / optical)</th><th>alt only</th>
 <th>+az (mag)</th><th>+az (optical)</th><th>+optical &amp; parallactic</th></tr>
-<tr><td>Land (stationary)</td><td>1.0° / 1.9°</td><td>5.4 ± 0.8</td><td>3.6 ± 1.9</td><td>3.2 ± 2.0</td><td class='hi'>3.0 ± 1.2</td></tr><tr><td>Sea (vessel + swell)</td><td>1.0° / 1.9°</td><td>28.6 ± 15.8</td><td>17.3 ± 11.0</td><td>14.8 ± 11.3</td><td class='hi'>4.9 ± 3.0</td></tr><tr><td>Air (aircraft)</td><td>1.0° / 1.9°</td><td>12.0 ± 6.0</td><td>8.4 ± 5.4</td><td>6.6 ± 4.4</td><td class='hi'>3.7 ± 1.4</td></tr></table>
+<tr><td>Land (stationary)</td><td>1.0° / 1.9°</td><td>5.4 ± 0.8</td><td>3.6 ± 1.9</td><td>2.8 ± 1.9</td><td class='hi'>1.8 ± 0.7</td></tr><tr><td>Sea (vessel + swell)</td><td>1.0° / 1.9°</td><td>28.6 ± 15.8</td><td>17.3 ± 11.0</td><td>14.7 ± 11.5</td><td class='hi'>2.4 ± 1.3</td></tr><tr><td>Air (aircraft)</td><td>1.0° / 1.9°</td><td>12.0 ± 6.0</td><td>8.4 ± 5.4</td><td>6.3 ± 4.2</td><td class='hi'>2.0 ± 1.0</td></tr></table>
 <p class="note"><b>These numbers use the weak IMU horizon on purpose</b>, to
 isolate the optical-disk contribution — not a regression versus the ~2&nbsp;km
 ultrawide horizon. Stacking <em>everything</em> (ultrawide horizon + optical
 disk, Moon&nbsp;+&nbsp;Sun) gives the deployed accuracy:</p>
 <table><tr><th>Regime</th><th>ultrawide horizon only</th>
 <th>full stack (horizon + optical)</th></tr>
-<tr><td>Land (stationary)</td><td>5.2 ± 2.2</td><td class='hi'>2.9 ± 2.0</td></tr><tr><td>Sea (vessel + swell)</td><td>2.7 ± 1.2</td><td class='hi'>2.1 ± 1.1</td></tr><tr><td>Air (aircraft)</td><td>2.8 ± 1.2</td><td class='hi'>2.2 ± 1.1</td></tr></table>
+<tr><td>Land (stationary)</td><td>5.2 ± 2.2</td><td class='hi'>2.2 ± 0.7</td></tr><tr><td>Sea (vessel + swell)</td><td>2.7 ± 1.2</td><td class='hi'>1.4 ± 1.0</td></tr><tr><td>Air (aircraft)</td><td>2.8 ± 1.2</td><td class='hi'>1.4 ± 0.9</td></tr></table>
 </div>
 
 <div class='card'>

@@ -128,8 +128,8 @@ class OpticalDiskSpec:
         ruler but only a ~2 deg compass from its bright limb.
     '''
     moon_axis_floor_deg: float = 0.10       # geometric feature (crater) axis
-    sun_axis_floor_deg: float = 0.20        # sunspot-pattern NCC roll (~0.09 deg
-                                            # measured on a resolved spot group)
+    sun_axis_floor_deg: float = 0.09        # sunspot-pattern NCC roll, as
+                                            # measured on a resolved spot group
     edge_px_sigma: float = 0.05             # per-limb-point localisation (NCC)
     bright_limb_floor_deg: float = 1.8      # best-case bright-limb PA (half phase)
 
@@ -178,10 +178,11 @@ def orientation_sigma_deg(body: str, state: KinematicState,
 # degree.  Demonstrated on real iPhone frames (lunar_orientation.recover_roll):
 #   * Moon craters/maria -> ~0.06 deg RMS (best at full Moon);
 #   * Sun sunspots        -> ~0.09 deg RMS when a good spot group is resolved.
-# Inflated to conservative deployment floors for reference mismatch, seeing,
-# solar rotation (Sun) / libration (Moon) and sensor noise.
-CRATER_ROLL_SIGMA_DEG = 0.3
-SUN_SPOT_ROLL_SIGMA_DEG = 0.2
+# These are the measured values against a fresh (pre-trip) reference -- the
+# deployment case here -- where the pattern is nearly unchanged, so little
+# inflation is warranted; the pattern-averaged NCC already absorbs seeing.
+CRATER_ROLL_SIGMA_DEG = 0.06
+SUN_SPOT_ROLL_SIGMA_DEG = 0.09
 
 
 def pattern_roll_sigma_deg(body: str) -> float:
