@@ -184,6 +184,56 @@ class TestImuFusion(unittest.TestCase):
                       **full_sv)["rms_err_km"]
         self.assertLess(full, no_uw)
 
+    def test_analytic_altitude_jacobian(self):
+        ''' The closed-form altitude Jacobian matches central finite diff. '''
+        import numpy as np
+        import gtsam
+        from gtsam import Pose3, Rot3, Point3
+        from imu_fusion.astro import (body_gp, enu_to_latlon,
+                                      predicted_altitude, predicted_azimuth)
+        from imu_fusion.celestial_factor_graph import _altitude_analytic_jacobian
+        from imu_fusion.numerical_derivative import numericalDerivative11
+        gp = body_gp("Sun", "2026-03-24 12:00:00")
+        pose = Pose3(Rot3(), Point3(2500.0, -1500.0, 30.0))
+
+        def predict(p):
+            t = p.translation()
+            lat, lon = enu_to_latlon(t[0], t[1], 51.5, 0.0)
+            return predicted_altitude(lat, lon, gp)
+        num = numericalDerivative11(predict, pose, 1e-4).flatten()
+        lat, lon = enu_to_latlon(pose.translation()[0], pose.translation()[1],
+                                 51.5, 0.0)
+        ana = np.asarray(_altitude_analytic_jacobian(
+            pose, predicted_azimuth(lat, lon, gp))).flatten()
+        np.testing.assert_allclose(ana, num, atol=1e-6)
+
+    def test_streaming_matches_batch(self):
+        ''' The streaming smoother's current-position error matches batch, and
+            recovers zero-noise truth. '''
+        from imu_fusion.realtime import solve_streaming
+        full = dict(horizon_mode="fused", use_azimuth=True,
+                    heading_source="optical", use_parallactic=True,
+                    sun_spots=True)
+        sc = build_scenario("sea", random.Random(21), n_shots=12, **full)
+        batch = solve(sc, use_imu=True, use_azimuth=True,
+                      use_parallactic=True)["final_err_km"]
+        stream = solve_streaming(sc)["final_err_km"]
+        self.assertLess(abs(batch - stream), 1.0)     # within noise
+        zn = build_scenario("sea", random.Random(21), n_shots=8,
+                            noise_scale=0.0, **full)
+        self.assertLess(solve_streaming(zn, pos_prior_km=100000.0)["rms_err_km"],
+                        0.6)
+
+    def test_ephemeris_cache(self):
+        ''' The GP cache returns an identical GP and is populated. '''
+        from imu_fusion import astro
+        astro.clear_gp_cache()
+        g1 = astro.body_gp("Moon", "2026-03-24 12:00:00")
+        g2 = astro.body_gp("Moon", "2026-03-24 12:00:00")
+        self.assertEqual((g1.get_lat(), g1.get_lon()),
+                         (g2.get_lat(), g2.get_lon()))
+        self.assertGreaterEqual(len(astro._GP_CACHE), 1)
+
     def test_starfix_baseline_runs(self):
         ''' The starfix single-fix baseline produces a finite error. '''
         sc = build_scenario("land", random.Random(4), n_shots=4)

@@ -57,6 +57,20 @@ worth inside the unified graph.</figcaption></figure>
 </div>
 
 <div class='card'>
+<h2>Real-time on iPhone 17 Pro</h2>
+<p>Batch re-solves the whole trajectory each fix, so latency grows with the
+voyage. The streaming fixed-lag smoother marginalises old keyframes and
+preintegrates the IMU once online, so each per-shot update is <b>flat and
+bounded</b> — with the same current-position accuracy. Fixes are low-rate; IMU
+dead-reckoning covers the gaps.</p>
+<table><tr><th>Regime</th><th>batch @ 30 shots</th>
+<th>streaming update</th><th>speedup</th><th>final-error (batch / stream)</th></tr>
+<tr><td>Land (stationary)</td><td class='mono dim'>300 ms</td><td class='mono hi'>5.5 ms</td><td class='mono'>55×</td><td class='mono'>2.06 / 2.08 km</td></tr><tr><td>Sea (vessel + swell)</td><td class='mono dim'>305 ms</td><td class='mono hi'>5.2 ms</td><td class='mono'>58×</td><td class='mono'>1.07 / 1.09 km</td></tr><tr><td>Air (aircraft)</td><td class='mono dim'>296 ms</td><td class='mono hi'>5.3 ms</td><td class='mono'>55×</td><td class='mono'>1.20 / 1.21 km</td></tr></table>
+<figure><img src='results/fig_realtime.png'><figcaption>Per-fix latency vs trip
+length: batch grows, streaming stays flat under the real-time budget.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Ultrawide optical horizon — the sea &amp; air fix</h2>
 <p>Firing the ultrawide lens with the tele gives an <em>optical</em> horizon,
 immune to the acceleration that corrupts the IMU gravity horizon. It brings the

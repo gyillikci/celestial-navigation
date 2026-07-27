@@ -38,6 +38,7 @@ import gtsam
 from gtsam import Pose3, Rot3, Point3
 from gtsam.symbol_shorthand import X, V, B
 
+from math import sin, cos, radians, pi
 from .astro import predicted_altitude, predicted_azimuth, enu_to_latlon, \
     great_circle_km
 from .optical_attitude import parallactic_angle_deg
@@ -45,19 +46,47 @@ from .iphone_model import G0
 
 _ARCMIN = 1.0 / 60.0
 
+# Analytic Jacobians switch.  When True the celestial factors supply closed-form
+# (or reduced two-point) Jacobians instead of the full 6-column finite
+# difference — the main per-relinearisation speedup for the real-time smoother.
+USE_ANALYTIC_JAC = True
+
+# Earth radius in metres (spherical model shared with astro.py).
+from .astro import _R_M as _EARTH_R_M
+_DEG_PER_M = (180.0 / pi) / _EARTH_R_M       # small-angle deg change per metre
+
 
 # --------------------------------------------------------------------------- #
 # Measurement factors (Python CustomFactor closures)
 # --------------------------------------------------------------------------- #
+#
+# Every celestial factor reads only pose.translation()[0:2] (the local ENU
+# east, north).  On the Pose3 retract tangent [rx,ry,rz, tx,ty,tz]:
+#   - the rotation columns (0,1,2) leave the translation unchanged  -> exactly 0
+#   - the "up" column (5) changes only height, which none of these read -> 0
+# so only columns 3,4 are non-zero.  The full 6-eval finite difference was
+# therefore doing 4 wasted evaluations per factor per linearisation.
 
-def _numeric_pose_jacobian(pose, scalar_fn, base_val, eps=1e-6):
-    ''' Finite-difference Jacobian (1x6, Fortran order) of a scalar function of
-        a Pose3, taken on the Pose3 retract tangent [rx,ry,rz,tx,ty,tz]. '''
+def _reduced_en_jacobian(pose, scalar_fn, base_val, eps=1e-6):
+    ''' Two-point finite difference on the (east, north) tangent columns only;
+        the other four columns are exactly zero.  1x6 Fortran-order. '''
     jac = np.zeros((1, 6), order="F")
-    for i in range(6):
+    for i in (3, 4):
         d = np.zeros(6)
         d[i] = eps
         jac[0, i] = (scalar_fn(pose.retract(d)) - base_val) / eps
+    return jac
+
+
+def _altitude_analytic_jacobian(pose, az_deg):
+    ''' Closed-form altitude gradient (intercept method): the computed altitude
+        increases toward the body's geographic position (its azimuth Az) at
+        1 rad per rad of angular distance, so in the local ENU tangent
+        d(alt)/d(east,north) = (sin Az, cos Az) / R_earth.  1x6 Fortran-order. '''
+    jac = np.zeros((1, 6), order="F")
+    az = radians(az_deg)
+    jac[0, 3] = sin(az) * _DEG_PER_M      # east
+    jac[0, 4] = cos(az) * _DEG_PER_M      # north
     return jac
 
 
@@ -75,7 +104,13 @@ def celestial_altitude_factor(key, gp, meas_alt_deg, sigma_arcmin,
         pose = values.atPose3(this.keys()[0])
         resid = predict(pose) - meas_alt_deg
         if H is not None:
-            H[0] = _numeric_pose_jacobian(pose, predict, predict(pose))
+            if USE_ANALYTIC_JAC:
+                t = pose.translation()
+                lat, lon = enu_to_latlon(t[0], t[1], lat0, lon0)
+                H[0] = _altitude_analytic_jacobian(
+                    pose, predicted_azimuth(lat, lon, gp))
+            else:
+                H[0] = _reduced_en_jacobian(pose, predict, predict(pose))
         return np.array([resid])
 
     return gtsam.CustomFactor(noise, [key], error)
@@ -95,7 +130,9 @@ def celestial_azimuth_factor(key, gp, meas_az_deg, sigma_arcmin, lat0, lon0):
         # Wrap the azimuth residual into [-180, 180].
         resid = (predict(pose) - meas_az_deg + 180.0) % 360.0 - 180.0
         if H is not None:
-            H[0] = _numeric_pose_jacobian(pose, predict, predict(pose))
+            # Azimuth has no simple closed form here; use the reduced two-point
+            # difference on the only informative DOF (east, north).
+            H[0] = _reduced_en_jacobian(pose, predict, predict(pose))
         return np.array([resid])
 
     return gtsam.CustomFactor(noise, [key], error)
@@ -115,7 +152,7 @@ def parallactic_angle_factor(key, gp, meas_q_deg, sigma_deg, lat0, lon0):
         pose = values.atPose3(this.keys()[0])
         resid = (predict(pose) - meas_q_deg + 180.0) % 360.0 - 180.0
         if H is not None:
-            H[0] = _numeric_pose_jacobian(pose, predict, predict(pose))
+            H[0] = _reduced_en_jacobian(pose, predict, predict(pose))
         return np.array([resid])
 
     return gtsam.CustomFactor(noise, [key], error)

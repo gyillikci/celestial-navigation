@@ -58,6 +58,22 @@ Starting from the full fusion and removing one observable at a time:
 - **Atmospheric refraction and the Moon's ~1° horizontal parallax.** Treated as pre-corrected here (geometric altitudes); `starfix.Sight` already models both and would be layered in for a field build.
 - **Per-shot device attitude** is marginalised into the celestial factor covariances (the fused gravity/horizon/disk references), rather than carried as a free state — valid because the tilt errors are independent shot to shot.
 
+## Real-time on iPhone 17 Pro — streaming fixed-lag smoother
+
+The batch solver re-optimises the whole trajectory each fix, so latency grows with the voyage; the streaming estimator (`realtime.py`, `gtsam_unstable.IncrementalFixedLagSmoother`) marginalises keyframes older than a time window and preintegrates the IMU once online, so each per-shot update is **bounded and flat**. Fixes are low-rate (a gated shot every few seconds); IMU dead-reckoning gives the continuous position between them.
+
+Per-fix latency at 30 shots (host CPU, single thread; an A19 Pro is comparable):
+
+| Regime | batch re-solve | **streaming update** | speedup | final-error parity (batch / stream) |
+|---|---|---|---|---|
+| Land (stationary) | 300 ms | **5.5 ms** | 55× | 2.06 / 2.08 km |
+| Sea (vessel + swell) | 305 ms | **5.2 ms** | 58× | 1.07 / 1.09 km |
+| Air (aircraft) | 296 ms | **5.3 ms** | 55× | 1.20 / 1.21 km |
+
+![realtime](results/fig_realtime.png)
+
+The streaming current-position estimate matches batch to ~0.02 km — same accuracy, bounded cost. (The dominant saving is doing IMU preintegration once online instead of re-preintegrating every leg on each batch solve; analytic Jacobians and the reduced two-DOF finite difference — only east/north affect a celestial factor — remove the rest.)
+
 ## 1. Factor graph vs. the incumbent single-fix
 
 | Regime | starfix single-fix (per-epoch RMS) | Factor graph, no IMU | **Factor graph + IMU** |

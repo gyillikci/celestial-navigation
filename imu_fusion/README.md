@@ -35,6 +35,7 @@ instants (local minima of |ω|) to keep each IMU-photo pair clean.
 |---|---|
 | `astro.py` | Body geographic position + predicted altitude/azimuth. Reuses `starfix`'s real Sun/Moon ephemeris. Local ENU ↔ lat/lon. |
 | `iphone_model.py` | Representative iPhone-class IMU + tele-camera noise; how motion corrupts the gravity horizon. |
+| `realtime.py` | Streaming estimator (`gtsam_unstable.IncrementalFixedLagSmoother`) — bounded per-shot latency for on-device use; `bench.py` benchmarks it vs batch. |
 | `ultrawide_horizon.py` | Optical horizon from the ultrawide lens (fired with the tele): an acceleration-immune tilt reference, fused with the IMU. Reuses `starfix.get_dip_of_horizon`. |
 | `optical_attitude.py` | Orientation from the tele-resolved disk: Moon bright-limb PA, illuminated fraction, Sun P-angle, and the parallactic angle *q* → magnetometer-free heading + a horizon-free position line. |
 | `capture_trigger.py` | Per-regime hand/platform disturbance model and the least-rotation "smart shutter" (gated vs. periodic). |
@@ -116,6 +117,20 @@ tables and figures.
   cuts the sea fix ~28 → ~12 km and the air fix ~12 → ~5 km. The Moon's limb is
   the workhorse; the Sun's P-angle needs a solar filter and visible spots.
 - Accuracy tracks **azimuth separation** of the two bodies (best near 90°).
+
+## Real-time on-device
+
+`realtime.py` runs the same fusion **incrementally** with a fixed-lag smoother
+so per-shot latency is **bounded** regardless of voyage length. Benchmark
+(`python -m imu_fusion.bench`): batch re-solve reaches **~330 ms/fix at 30
+shots and grows**, while streaming stays **flat at ~5–6 ms/update** — same
+current-position accuracy (within ~0.02 km). Fixes are low-rate (a gated shot
+every few seconds); IMU dead-reckoning gives the continuous position between
+them. The main saving is doing IMU preintegration **once online** instead of
+re-preintegrating every leg per solve; analytic Jacobians + a reduced two-DOF
+finite difference (only east/north move a celestial factor) remove the rest.
+The image processing (disk centroid, horizon-line fit, limb/spot detect) runs
+on the Neural Engine/GPU and is out of scope here.
 
 ## Modelling assumptions & honest limitations
 

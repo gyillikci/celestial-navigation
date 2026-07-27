@@ -33,21 +33,40 @@ from starfix import (Sight, LatLonGeodetic, LatLonGeocentric, get_azimuth,
 # the measurement model transparent and differentiable.
 
 
+# Ephemeris cache.  body_gp() builds a starfix.Sight (a pandas almanac lookup)
+# per call, which dominates a fix's wall-clock.  A body's GP depends only on
+# (object, time), so memoise it.  A single shot reuses the same two GPs across
+# every factor and every solver relinearisation; a streaming run reuses them for
+# the lifetime of the keyframe.  On-device this cache stands in for precomputing
+# the day's GHA/Dec polynomial (no pandas at fix time).
+_GP_CACHE: dict = {}
+
+
+def clear_gp_cache() -> None:
+    ''' Drop the ephemeris cache (e.g. between benchmark configurations). '''
+    _GP_CACHE.clear()
+
+
 def body_gp(object_name: str, time_iso: str) -> LatLonGeocentric:
     ''' Return the geographic position (sub-point) of a body at a UTC time.
 
-        Reuses `starfix.Sight`'s ephemeris interpolation.  The GP depends only on
-        the interpolated GHA/Dec, not on the (dummy) measured altitude or any
-        sextant correction, so those are chosen to be inert.
+        Reuses `starfix.Sight`'s ephemeris interpolation (memoised).  The GP
+        depends only on the interpolated GHA/Dec, not on the (dummy) measured
+        altitude or any sextant correction, so those are chosen to be inert.
     '''
-    dummy = Sight(object_name=object_name,
-                  set_time=time_iso,
-                  measured_alt="45:0:0",
-                  estimated_position=LatLonGeodetic(0, 0),
-                  ho_obs=True,               # skip refraction + dip
-                  limb_correction=0,         # disk centre
-                  horizontal_parallax=0)     # geometric (no topocentric shift)
-    return dummy.get_gp()
+    key = (object_name.lower(), time_iso)
+    gp = _GP_CACHE.get(key)
+    if gp is None:
+        dummy = Sight(object_name=object_name,
+                      set_time=time_iso,
+                      measured_alt="45:0:0",
+                      estimated_position=LatLonGeodetic(0, 0),
+                      ho_obs=True,               # skip refraction + dip
+                      limb_correction=0,         # disk centre
+                      horizontal_parallax=0)     # geometric (no topocentric)
+        gp = dummy.get_gp()
+        _GP_CACHE[key] = gp
+    return gp
 
 
 def gp_dec_gha(gp: LatLonGeocentric) -> tuple[float, float]:
