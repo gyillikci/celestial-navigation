@@ -142,6 +142,20 @@ the sunspot anchor cuts the fix error several-fold.</figcaption></figure>
 </div>
 
 <div class='card'>
+<h2>What if cloud obscures the tracked body?</h2>
+<p>Cloud hits both the sight (no line of position) and the anchor (gyro
+calibration stops). It degrades gracefully: obscured shots are dropped, the fix
+continues on whatever is clear, and when both bodies are lost it coasts on the
+freshly-calibrated IMU until a gap lets it re-anchor. The practical coast budget
+is ~1–2 minutes (sub-km) before attitude drift leaks into position; persistent
+overcast makes celestial unavailable, like any sextant.</p>
+<figure><img src='results/fig_cloud.png'><figcaption>Fix error rises smoothly
+with cloud cover; shot availability tracks the clear sky.</figcaption></figure>
+<figure><img src='results/fig_coast.png'><figcaption>Coast budget when both
+bodies are lost: sub-km for ~2 minutes, then dead-reckoning runs away.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;

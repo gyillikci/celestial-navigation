@@ -38,7 +38,8 @@ instants (local minima of |ω|) to keep each IMU-photo pair clean.
 | `realtime.py` | Streaming estimator (`gtsam_unstable.IncrementalFixedLagSmoother`) — bounded per-shot latency for on-device use; `bench.py` benchmarks it vs batch. |
 | `ultrawide_horizon.py` | Optical horizon from the ultrawide lens (fired with the tele): an acceleration-immune tilt reference, fused with the IMU. Reuses `starfix.get_dip_of_horizon`. |
 | `optical_attitude.py` | Orientation from the tele-resolved disk: Moon bright-limb PA, illuminated fraction, Sun P-angle, and the parallactic angle *q* → magnetometer-free heading + a horizon-free position line. |
-| `visual_anchor.py` | Tracked sunspot / disk feature as a star-tracker anchor: bounds gyro drift and gives an acceleration-immune attitude/vertical (moving or stationary) — rescues the fix when the optical horizon is unavailable. |
+| `visual_anchor.py` | Tracked sunspot / disk feature as a star-tracker anchor: bounds gyro drift and gives an acceleration-immune attitude/vertical (moving or stationary) — rescues the fix when the optical horizon is unavailable. Also the cloud-outage coast models. |
+| `cloud.py` | Temporally-correlated cloud occlusion (Markov passages): drops obscured sights and coasts the anchor — graceful degradation and a coast-time budget. |
 | `capture_trigger.py` | Per-regime hand/platform disturbance model and the least-rotation "smart shutter" (gated vs. periodic). |
 | `scenario.py` | Sea/land/air ground truth from the ephemeris + noisy Sun+Moon measurements + IMU stream. |
 | `celestial_factor_graph.py` | GTSAM graph: celestial altitude `CustomFactor` per sight, `ImuFactor` between shots, priors, LM solve, `Marginals` covariance. |

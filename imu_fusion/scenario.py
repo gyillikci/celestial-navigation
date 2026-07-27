@@ -34,7 +34,8 @@ from .ultrawide_horizon import (UltrawideHorizonSpec, DEFAULT_UW,
                                 horizon_reference_sigma_lens)
 from .optical_attitude import (parallactic_angle_deg, parallactic_sigma_deg,
                                optical_heading_sigma_deg, moon_limb_available)
-from .visual_anchor import anchor_horizon_sigma_arcmin
+from .visual_anchor import anchor_horizon_sigma_arcmin, coast_attitude_arcmin
+from .cloud import CloudSpec, body_clear_flags
 from .capture_trigger import PROFILES, simulate_trace, find_shutter_instants
 
 # Canonical daytime epoch.  Greenwich (the home of longitude) near local noon,
@@ -139,7 +140,8 @@ def build_scenario(regime: str,
                    horizon_lens: str = None,
                    imu_anchor: bool = False,
                    anchor_track_s: float = 10.0,
-                   anchor_pos_km: float = 3.0) -> Scenario:
+                   anchor_pos_km: float = 3.0,
+                   cloud: CloudSpec = None) -> Scenario:
     ''' Generate a full scenario: trajectory, true geometry, noisy measurements
         and IMU stream.
 
@@ -167,6 +169,14 @@ def build_scenario(regime: str,
     shutters = find_shutter_instants(t_trace, w_trace, a_trace,
                                      n_shots, shot_interval_s * 0.6, gated)
 
+    # Cloud occlusion: per-body clear/obscured over the shot times, plus the
+    # tracked-anchor body's clear runs (for coasting the attitude during an
+    # outage).  The anchor tracks the first body that is up.
+    shot_times = [t for t, _ in shutters]
+    clear_flags = body_clear_flags(shot_times, bodies, cloud, rng)
+    anchor_body = bodies[0]
+    last_anchor_clear_t = shot_times[0] if shot_times else 0.0
+
     keyframes = []
     for k, (t_s, kin) in enumerate(shutters):
         # True observer position at this time.
@@ -179,6 +189,12 @@ def build_scenario(regime: str,
                       true_lat=lat, true_lon=lon,
                       true_east=east, true_north=north)
 
+        # Anchor coast: if the tracked body is clear now, the anchor is live;
+        # otherwise the attitude coasts on the gyro since it was last clear.
+        if clear_flags[anchor_body][k]:
+            last_anchor_clear_t = t_s
+        anchor_coast_s = t_s - last_anchor_clear_t
+
         # Horizon reference sigma for THIS shot: IMU gravity, optical ultrawide
         # horizon, or their fusion.  The tele-camera pointing error adds in
         # quadrature to give the altitude measurement sigma.
@@ -187,6 +203,9 @@ def build_scenario(regime: str,
         href_common = horizon_reference_sigma_arcmin(horizon_mode, kin, regime,
                                                      imu, uw)
         for body in bodies:
+            # Cloud: a body obscured at this shot yields no sight (drop it).
+            if not clear_flags[body][k]:
+                continue
             gp = body_gp(body, iso)
             t_alt, t_az = altaz(lat, lon, gp)
             if horizon_lens is None:
@@ -200,9 +219,14 @@ def build_scenario(regime: str,
             # is unavailable (high sights, land, out of frame -> href ~ IMU) and
             # modestly sharpens the rest.
             if imu_anchor:
-                s_anchor = anchor_horizon_sigma_arcmin(anchor_pos_km,
-                                                       anchor_track_s, kin,
-                                                       imu, cam)
+                if anchor_coast_s <= 0.0:
+                    s_anchor = anchor_horizon_sigma_arcmin(anchor_pos_km,
+                                                           anchor_track_s, kin,
+                                                           imu, cam)
+                else:
+                    # Tracked body clouded: the anchor coasts on the gyro.
+                    s_anchor = coast_attitude_arcmin(anchor_coast_s, imu,
+                                                     calibrated=True)
                 href = 1.0 / ((1.0 / href ** 2 + 1.0 / s_anchor ** 2) ** 0.5)
             a_sig = (cam.pointing_sigma_arcmin() ** 2 + href ** 2) ** 0.5
             meas_alt = t_alt + noise_scale * rng.gauss(0.0, a_sig / 60.0)

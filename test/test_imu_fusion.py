@@ -313,6 +313,37 @@ class TestImuFusion(unittest.TestCase):
                             imu_anchor=True, **full)
         self.assertLess(solve(zn, pos_prior_km=100000.0, **sv)["rms_err_km"], 0.6)
 
+    def test_cloud_degrades_gracefully(self):
+        ''' Cloud drops obscured sights; the fix degrades smoothly and never
+            crashes even with sparse/empty keyframes; cloud=None is unchanged. '''
+        from imu_fusion.cloud import CloudSpec
+        full = dict(horizon_mode="fused", use_azimuth=True,
+                    heading_source="optical", use_parallactic=True,
+                    sun_spots=True, imu_anchor=True)
+        sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+
+        def mean_rms(cf):
+            cloud = None if cf >= 1.0 else CloudSpec(clear_fraction=cf)
+            return sum(solve(build_scenario("sea", random.Random(60 + s),
+                                            n_shots=14, cloud=cloud, **full),
+                             **sv)["rms_err_km"] for s in range(4)) / 4.0
+        clear = mean_rms(1.0)
+        heavy = mean_rms(0.3)
+        self.assertGreater(heavy, clear)              # worse under cloud
+        self.assertLess(heavy, 15.0)                  # but still bounded
+
+    def test_coast_budget(self):
+        ''' Position dead-reckoning stays sub-km for a minute or two and grows;
+            the calibrated gyro coasts no worse than the uncalibrated. '''
+        from imu_fusion.visual_anchor import (deadreckon_position_km,
+                                              coast_attitude_arcmin)
+        a60 = coast_attitude_arcmin(60)
+        self.assertLess(deadreckon_position_km(60, 0.5, a60), 0.5)     # <500 m/min
+        self.assertGreater(deadreckon_position_km(300, 0.5,
+                           coast_attitude_arcmin(300)), 2.0)           # blows up
+        self.assertLessEqual(coast_attitude_arcmin(120, calibrated=True),
+                             coast_attitude_arcmin(120, calibrated=False))
+
     def test_starfix_baseline_runs(self):
         ''' The starfix single-fix baseline produces a finite error. '''
         sc = build_scenario("land", random.Random(4), n_shots=4)

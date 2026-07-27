@@ -116,6 +116,61 @@ def anchor_horizon_sigma_arcmin(pos_km: float, track_time_s: float,
     return sqrt(att ** 2 + pos_vertical ** 2)
 
 
+# --------------------------------------------------------------------------- #
+# Coasting when the anchor is lost (cloud occlusion).
+# --------------------------------------------------------------------------- #
+
+# Fraction of the raw gyro bias that survives after the anchor has calibrated it.
+CALIBRATED_BIAS_FRACTION = 0.2
+
+
+def coast_attitude_arcmin(outage_s: float, imu: IphoneImuSpec = DEFAULT_IMU,
+                          calibrated: bool = True,
+                          start_arcmin: float = 2.0) -> float:
+    ''' Attitude error after the anchor is lost for `outage_s` seconds.
+
+        The gyro coasts from the last anchored attitude (`start_arcmin`).  If the
+        anchor had just CALIBRATED the gyro, only a small residual bias remains,
+        so the coast is slow; without calibration the full raw bias drifts fast.
+    '''
+    frac = CALIBRATED_BIAS_FRACTION if calibrated else 1.0
+    bias_ramp = frac * imu.gyro_bias * outage_s
+    arw = imu.gyro_noise_density * sqrt(max(outage_s, 0.0))
+    biasrw = 0.5 * imu.gyro_bias_rw * (max(outage_s, 0.0) ** 1.5)
+    drift = sqrt(bias_ramp ** 2 + arw ** 2 + biasrw ** 2) * ARCMIN_PER_RAD
+    return sqrt(start_arcmin ** 2 + drift ** 2)
+
+
+def deadreckon_position_km(outage_s: float, vel_sigma_ms: float,
+                           attitude_arcmin: float,
+                           imu: IphoneImuSpec = DEFAULT_IMU) -> float:
+    ''' Inertial dead-reckoning position drift over a celestial outage [km].
+
+        Two dominant terms: the current velocity error carried forward
+        (vel_sigma * t), and a tilt-leak — an attitude error theta tips the
+        gravity subtraction, injecting a horizontal acceleration ~ g*theta that
+        integrates twice over time.
+    '''
+    theta = attitude_arcmin / ARCMIN_PER_RAD                # rad
+    vel_term = vel_sigma_ms * outage_s
+    tilt_term = 0.5 * G0 * theta * outage_s ** 2
+    return sqrt(vel_term ** 2 + tilt_term ** 2) / 1000.0
+
+
+def coast_curve(times, vel_sigma_ms: float = 0.5) -> dict:
+    ''' Attitude and DR-position drift vs outage duration, with vs without the
+        anchor having pre-calibrated the gyro. '''
+    att_cal = [coast_attitude_arcmin(t, calibrated=True) for t in times]
+    att_raw = [coast_attitude_arcmin(t, calibrated=False) for t in times]
+    pos_cal = [deadreckon_position_km(t, vel_sigma_ms, a)
+               for t, a in zip(times, att_cal)]
+    pos_raw = [deadreckon_position_km(t, vel_sigma_ms, a)
+               for t, a in zip(times, att_raw)]
+    return {"time": list(times), "att_calibrated": att_cal,
+            "att_uncalibrated": att_raw, "pos_calibrated_km": pos_cal,
+            "pos_uncalibrated_km": pos_raw}
+
+
 def attitude_error_curve(times, moving: bool,
                          imu: IphoneImuSpec = DEFAULT_IMU,
                          cam: TeleCameraSpec = DEFAULT_CAM,

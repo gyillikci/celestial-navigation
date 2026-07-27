@@ -130,6 +130,33 @@ The gyro alone diverges (~0.17′/s); the accelerometer is bounded but wrecked b
 
 So the anchor is transformative exactly where the accelerometer and the optical horizon fail, and a modest sharpener elsewhere. Cost: it needs a body **continuously tracked** in the tele field (the Sun through a filter, or the Moon's features), and the anchored vertical is only as good as the position estimate (~1–2′ at a ~2 km fix).
 
+## What if cloud obscures the tracked body?
+
+Cloud hits both the **sight** for that body (no line of position) and the **visual anchor** (the gyro stops being calibrated). The system degrades gracefully: obscured shots are dropped, the fix continues on whatever is clear, and when both bodies are lost it **coasts** on the (freshly calibrated) IMU until the sky clears and it re-anchors.
+
+**Graceful degradation** — fix RMS (km) vs cloud cover:
+
+| Regime | 0% cloud | 15% cloud | 30% cloud | 45% cloud | 60% cloud | 75% cloud |
+|---|---|---|---|---|---|---|
+| Land (stationary) | 2.0 ± 0.8 | 2.4 ± 0.8 | 3.2 ± 1.0 | 3.4 ± 1.6 | 5.0 ± 4.5 | 4.7 ± 2.3 |
+| Sea (vessel + swell) | 1.6 ± 0.7 | 2.2 ± 0.5 | 2.3 ± 0.7 | 2.5 ± 1.5 | 3.3 ± 1.4 | 4.4 ± 4.0 |
+| Air (aircraft) | 1.6 ± 0.7 | 2.1 ± 0.6 | 2.3 ± 0.7 | 2.7 ± 1.3 | 2.6 ± 2.0 | 3.7 ± 2.8 |
+
+![cloud](results/fig_cloud.png)
+
+**Coast budget** — when both bodies are clouded there are no new sights, so position dead-reckons on the IMU. The anchor's parting gift is a calibrated gyro, but the coast is ultimately limited by gyro random-walk:
+
+| Outage | attitude error | DR position drift |
+|---|---|---|
+| 30 s | 7′ | 17 m |
+| 60 s | 17′ | 91 m |
+| 120 s | 46′ | 941 m |
+| 300 s | 179′ | 22996 m |
+
+![coast](results/fig_coast.png)
+
+So the practical coast budget is **~1–2 minutes** (sub-km) before attitude drift leaks into the position quadratically. One body clouded → carry on with the other; both clouded → coast a minute or two, then it's dead-reckoning until a gap in the cloud lets it re-anchor and snap back. Persistent overcast → celestial is unavailable, like any sextant.
+
 ## 1. Factor graph vs. the incumbent single-fix
 
 | Regime | starfix single-fix (per-epoch RMS) | Factor graph, no IMU | **Factor graph + IMU** |

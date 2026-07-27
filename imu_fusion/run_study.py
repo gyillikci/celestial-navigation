@@ -181,6 +181,37 @@ FULL_SC = dict(horizon_mode="fused", use_azimuth=True, heading_source="optical",
 FULL_SV = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
 
 
+def exp_cloud(clear_fractions=(1.0, 0.85, 0.7, 0.55, 0.4, 0.25), n_shots=14):
+    ''' Graceful degradation: fix RMS and shot availability vs cloud cover. '''
+    from .cloud import CloudSpec
+    full = dict(horizon_mode="fused", use_azimuth=True, heading_source="optical",
+                use_parallactic=True, sun_spots=True, imu_anchor=True)
+    sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+    out = {}
+    for r in REGIMES:
+        out[r] = {}
+        for cf in clear_fractions:
+            cloud = None if cf >= 1.0 else CloudSpec(clear_fraction=cf,
+                                                     mean_passage_s=25.0)
+            rms, avail = [], []
+            for s in range(N_SEEDS):
+                sc = build_scenario(r, random.Random(9800 + s), n_shots=n_shots,
+                                    cloud=cloud, **full)
+                nobs = sum(len(kf.observations) for kf in sc.keyframes)
+                avail.append(nobs / (n_shots * len(sc.bodies)))
+                rms.append(solve(sc, **sv)["rms_err_km"])
+            out[r][cf] = dict(rms=_mean_std(rms),
+                              avail=float(np.mean(avail)))
+    return out
+
+
+def exp_coast(times=(5, 15, 30, 60, 120, 180, 300)):
+    ''' Coast budget while both bodies are clouded: attitude and DR position
+        drift vs outage duration, with vs without prior anchor calibration. '''
+    from .visual_anchor import coast_curve
+    return coast_curve(times)
+
+
 def exp_anchor_drift(times=(0.5, 1, 2, 5, 10, 30, 60, 120, 300)):
     ''' Attitude error vs tracking time: gyro-only vs accelerometer-aided vs
         visual-anchor-aided, stationary and moving. '''
@@ -457,6 +488,67 @@ def plot_ablation(ab, path):
     ax.set_title("Leave-one-out: each observable's worth inside the unified graph")
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_cloud(cd, path):
+    ''' Fix RMS (bars) and shot availability (line) vs cloud cover. '''
+    fig, ax = plt.subplots(figsize=(8.5, 4.6))
+    cfs = sorted(next(iter(cd.values())).keys(),
+                 key=lambda c: float(c), reverse=True)
+    covers = [round((1 - float(c)) * 100) for c in cfs]
+    x = np.arange(len(cfs))
+    w = 0.26
+    cols = {"land": "#edae49", "sea": "#00798c", "air": "#3ddc97"}
+    for i, r in enumerate(REGIMES):
+        means = [cd[r][c]["rms"][0] for c in cfs]
+        errs = [cd[r][c]["rms"][1] for c in cfs]
+        ax.bar(x + (i - 1) * w, means, w, yerr=errs, capsize=2,
+               color=cols[r], label=REGIME_LABEL[r])
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{c}%" for c in covers])
+    ax.set_xlabel("cloud cover")
+    ax.set_ylabel("RMS position error (km)")
+    ax.set_title("Graceful degradation as cloud obscures the bodies")
+    ax.legend(loc="upper left")
+    ax.grid(axis="y", alpha=0.3)
+    ax2 = ax.twinx()
+    avail = [np.mean([cd[r][c]["avail"] for r in REGIMES]) * 100 for c in cfs]
+    ax2.plot(x, avail, color="#666", marker="o", ls="--", label="shots usable")
+    ax2.set_ylabel("shots usable (%)", color="#666")
+    ax2.set_ylim(0, 105)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_coast(cc, path):
+    ''' Coast budget: attitude and DR position drift vs outage duration. '''
+    t = cc["time"]
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 4.4))
+    a1.plot(t, cc["att_calibrated"], marker="o", color="#00798c",
+            label="anchor-calibrated gyro")
+    a1.plot(t, cc["att_uncalibrated"], marker="s", color="#d1495b",
+            label="uncalibrated gyro")
+    a1.set_xlabel("cloud outage (s)")
+    a1.set_ylabel("attitude / horizon error (arc min)")
+    a1.set_title("Attitude coast")
+    a1.grid(alpha=0.3)
+    a1.legend(fontsize=8)
+    a2.plot(t, cc["pos_calibrated_km"], marker="o", color="#00798c",
+            label="anchor-calibrated")
+    a2.plot(t, cc["pos_uncalibrated_km"], marker="s", color="#d1495b",
+            label="uncalibrated")
+    a2.axhline(1.0, color="#666", ls=":", lw=1)
+    a2.text(t[0], 1.05, "1 km", fontsize=7, color="#666")
+    a2.set_xlabel("cloud outage (s)")
+    a2.set_ylabel("dead-reckoned position drift (km)")
+    a2.set_title("Position coast (both bodies clouded)")
+    a2.grid(alpha=0.3)
+    a2.legend(fontsize=8)
+    fig.suptitle("Coast budget when the sky is lost", fontsize=12)
     fig.tight_layout()
     fig.savefig(path, dpi=130)
     plt.close(fig)
@@ -1053,6 +1145,48 @@ def write_results_md(data, path):
                  "the anchored vertical is only as good as the position estimate "
                  "(~1–2′ at a ~2 km fix).\n")
 
+    # ------- cloud section -------
+    if "cloud" in data:
+        cd = data["cloud"]
+        cc = data["coast"]
+
+        def _ct(key, t):
+            return cc[key][cc["time"].index(t)]
+        L.append("## What if cloud obscures the tracked body?\n")
+        L.append("Cloud hits both the **sight** for that body (no line of "
+                 "position) and the **visual anchor** (the gyro stops being "
+                 "calibrated). The system degrades gracefully: obscured shots are "
+                 "dropped, the fix continues on whatever is clear, and when both "
+                 "bodies are lost it **coasts** on the (freshly calibrated) IMU "
+                 "until the sky clears and it re-anchors.\n")
+        L.append("**Graceful degradation** — fix RMS (km) vs cloud cover:\n")
+        cfs = sorted(next(iter(cd.values())).keys(), key=lambda c: float(c),
+                     reverse=True)
+        L.append("| Regime | " +
+                 " | ".join(f"{round((1-float(c))*100)}% cloud" for c in cfs) +
+                 " |")
+        L.append("|" + "---|" * (len(cfs) + 1))
+        for r in REGIMES:
+            L.append(f"| {REGIME_LABEL[r]} | " +
+                     " | ".join(cell(cd[r][c]["rms"]) for c in cfs) + " |")
+        L.append("\n![cloud](results/fig_cloud.png)\n")
+        L.append("**Coast budget** — when both bodies are clouded there are no "
+                 "new sights, so position dead-reckons on the IMU. The anchor's "
+                 "parting gift is a calibrated gyro, but the coast is ultimately "
+                 "limited by gyro random-walk:\n")
+        L.append("| Outage | attitude error | DR position drift |")
+        L.append("|---|---|---|")
+        for t in (30, 60, 120, 300):
+            L.append(f"| {t} s | {_ct('att_calibrated', t):.0f}′ | "
+                     f"{_ct('pos_calibrated_km', t)*1000:.0f} m |")
+        L.append("\n![coast](results/fig_coast.png)\n")
+        L.append("So the practical coast budget is **~1–2 minutes** (sub-km) "
+                 "before attitude drift leaks into the position quadratically. "
+                 "One body clouded → carry on with the other; both clouded → "
+                 "coast a minute or two, then it's dead-reckoning until a gap in "
+                 "the cloud lets it re-anchor and snap back. Persistent overcast "
+                 "→ celestial is unavailable, like any sextant.\n")
+
     L.append("## 1. Factor graph vs. the incumbent single-fix\n")
     L.append("| Regime | starfix single-fix (per-epoch RMS) | "
              "Factor graph, no IMU | **Factor graph + IMU** |")
@@ -1384,6 +1518,20 @@ the sunspot anchor cuts the fix error several-fold.</figcaption></figure>
 </div>
 
 <div class='card'>
+<h2>What if cloud obscures the tracked body?</h2>
+<p>Cloud hits both the sight (no line of position) and the anchor (gyro
+calibration stops). It degrades gracefully: obscured shots are dropped, the fix
+continues on whatever is clear, and when both bodies are lost it coasts on the
+freshly-calibrated IMU until a gap lets it re-anchor. The practical coast budget
+is ~1–2 minutes (sub-km) before attitude drift leaks into position; persistent
+overcast makes celestial unavailable, like any sextant.</p>
+<figure><img src='results/fig_cloud.png'><figcaption>Fix error rises smoothly
+with cloud cover; shot availability tracks the clear sky.</figcaption></figure>
+<figure><img src='results/fig_coast.png'><figcaption>Coast budget when both
+bodies are lost: sub-km for ~2 minutes, then dead-reckoning runs away.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
@@ -1419,6 +1567,7 @@ def main():
                 fullstack=exp_fullstack(), ablation=exp_ablation(),
                 realtime=exp_realtime(), zoom=exp_zoom(), lens=exp_lens(),
                 anchor_drift=exp_anchor_drift(), anchor_fix=exp_anchor_fix(),
+                cloud=exp_cloud(), coast=exp_coast(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)
@@ -1436,6 +1585,8 @@ def main():
     plot_anchor_drift(data["anchor_drift"],
                       os.path.join(OUT, "fig_anchor_drift.png"))
     plot_anchor_fix(data["anchor_fix"], os.path.join(OUT, "fig_anchor_fix.png"))
+    plot_cloud(data["cloud"], os.path.join(OUT, "fig_cloud.png"))
+    plot_coast(data["coast"], os.path.join(OUT, "fig_coast.png"))
     plot_convergence(data["convergence"], os.path.join(OUT, "fig_convergence.png"))
     plot_trigger(os.path.join(OUT, "fig_trigger.png"))
     plot_ellipse(os.path.join(OUT, "fig_ellipse.png"))
