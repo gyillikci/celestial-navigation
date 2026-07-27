@@ -16,6 +16,48 @@
 
 6. **Geometry matters:** the fix is well-conditioned only when the Sun and Moon are well separated in azimuth (~90° here, a first-quarter Moon); near-parallel lines of position degrade it.
 
+## The unified factor graph — everything fused
+
+One graph fuses every observable at once. Per Sun+Moon shot there is a pose `X(i)` (position + attitude), a velocity `V(i)` and a shared IMU bias `B`; consecutive keyframes are tied by IMU preintegration, and each shot contributes six celestial factors (altitude, azimuth and parallactic line, for the Sun and the Moon).
+
+![factor graph](results/fig_factorgraph.png)
+
+**Observables fused** (and where each comes from):
+
+- **Altitude** of Sun and Moon — tele pointing measured against the horizon reference. *Position lines.*
+- **Horizon reference** = **IMU gravity** ⊕ **ultrawide optical horizon** (acceleration-immune, dip-corrected). *Sets the altitude covariance.*
+- **Azimuth** of Sun and Moon — usable because the **tele-disk orientation** (Moon bright limb, Sun sunspot P-angle) gives a **magnetometer-free heading**. *Position lines.*
+- **Parallactic angle q** of each body — the disk orientation vs. the vertical. *Independent, horizon-free position line.*
+- **IMU preintegration** between shots (+ bias state). *Links the trajectory, smooths many fixes.*
+- **Least-rotation gating** — selects the calm shutter instants that feed the graph.
+- **Coarse position prior** (a stale ~30 km dead-reckoning). *Disambiguates; does not drive accuracy.*
+
+Deployed accuracy of the **full fusion** (RMS km, 8 seeds):
+
+| Regime | full fusion |
+|---|---|
+| Land (stationary) | **4.8 ± 1.6** |
+| Sea (vessel + swell) | **2.5 ± 0.6** |
+| Air (aircraft) | **2.6 ± 0.8** |
+
+### What each observable is worth (leave-one-out)
+
+Starting from the full fusion and removing one observable at a time:
+
+| Regime | full fusion | - ultrawide horizon | - IMU link | - optical azimuth | - parallactic line | - gating | - Moon (Sun only) |
+|---|---|---|---|---|---|---|---|
+| Land (stationary) | 4.8 ± 1.6 | 4.8 ± 1.6 | 15.5 ± 1.4 | 3.7 ± 2.3 | 3.9 ± 2.1 | 6.7 ± 3.0 | 6.1 ± 3.5 |
+| Sea (vessel + swell) | 2.5 ± 0.6 | 15.2 ± 7.4 | 8.1 ± 0.8 | 2.0 ± 1.1 | 2.0 ± 1.1 | 4.6 ± 2.0 | 5.6 ± 3.6 |
+| Air (aircraft) | 2.6 ± 0.8 | 7.9 ± 3.9 | 8.6 ± 0.9 | 2.1 ± 1.3 | 2.2 ± 1.2 | 3.1 ± 0.9 | 5.3 ± 3.2 |
+
+![ablation](results/fig_ablation.png)
+
+### Deliberately left out (and why)
+
+- **Lunar distance for time/longitude.** The Sun-Moon separation (or the Moon's phase) gives chronometer-free GMT — but a phone already has an accurate clock, so time is known and this is not needed. It would matter only for a long clock outage.
+- **Atmospheric refraction and the Moon's ~1° horizontal parallax.** Treated as pre-corrected here (geometric altitudes); `starfix.Sight` already models both and would be layered in for a field build.
+- **Per-shot device attitude** is marginalised into the celestial factor covariances (the fused gravity/horizon/disk references), rather than carried as a free state — valid because the tilt errors are independent shot to shot.
+
 ## 1. Factor graph vs. the incumbent single-fix
 
 | Regime | starfix single-fix (per-epoch RMS) | Factor graph, no IMU | **Factor graph + IMU** |

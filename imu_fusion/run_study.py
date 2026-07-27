@@ -175,6 +175,38 @@ def exp_fullstack(n_shots=12):
     return out
 
 
+# The unified full-fusion configuration: every observable turned on together.
+FULL_SC = dict(horizon_mode="fused", use_azimuth=True, heading_source="optical",
+               use_parallactic=True, sun_spots=True, gated=True)
+FULL_SV = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+
+
+def exp_ablation(n_shots=12):
+    ''' Leave-one-out from the unified full fusion: how much each observable is
+        worth *inside the combined graph*. '''
+    variants = {
+        "full fusion": (FULL_SC, FULL_SV),
+        "- ultrawide horizon": ({**FULL_SC, "horizon_mode": "imu"}, FULL_SV),
+        "- IMU link": (FULL_SC, {**FULL_SV, "use_imu": False}),
+        "- optical azimuth": ({**FULL_SC, "use_azimuth": False},
+                              {**FULL_SV, "use_azimuth": False}),
+        "- parallactic line": ({**FULL_SC, "use_parallactic": False},
+                               {**FULL_SV, "use_parallactic": False}),
+        "- gating": ({**FULL_SC, "gated": False}, FULL_SV),
+        "- Moon (Sun only)": ({**FULL_SC, "bodies": ("Sun",)}, FULL_SV),
+    }
+    out = {}
+    for r in REGIMES:
+        row = {}
+        for name, (sc_kw, sv_kw) in variants.items():
+            vals = [solve(build_scenario(r, random.Random(8000 + s),
+                                         n_shots=n_shots, **sc_kw),
+                          **sv_kw)["rms_err_km"] for s in range(N_SEEDS)]
+            row[name] = _mean_std(vals)
+        out[r] = row
+    return out
+
+
 def exp_heading_budget():
     ''' Heading sigma (deg): magnetometer vs optical disk orientation. '''
     from .optical_attitude import optical_heading_sigma_deg
@@ -302,6 +334,101 @@ def plot_horizon(hz, path):
                  "RMS position error (km)")
     fig.tight_layout()
     fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_ablation(ab, path):
+    ''' Leave-one-out degradation from full fusion, per regime. '''
+    order = ["full fusion", "- ultrawide horizon", "- IMU link",
+             "- optical azimuth", "- parallactic line", "- gating",
+             "- Moon (Sun only)"]
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    x = np.arange(len(order))
+    w = 0.26
+    cols = {"land": "#edae49", "sea": "#00798c", "air": "#3ddc97"}
+    for i, r in enumerate(REGIMES):
+        means = [ab[r][k][0] for k in order]
+        errs = [ab[r][k][1] for k in order]
+        ax.bar(x + (i - 1) * w, means, w, yerr=errs, capsize=2,
+               label=REGIME_LABEL[r], color=cols[r])
+    ax.set_xticks(x)
+    ax.set_xticklabels(order, rotation=25, ha="right", fontsize=8.5)
+    ax.set_ylabel("RMS position error (km)")
+    ax.set_title("Leave-one-out: each observable's worth inside the unified graph")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_factorgraph(path):
+    ''' Schematic of the unified factor graph (3 keyframes). '''
+    from matplotlib.patches import Circle, FancyBboxPatch
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.set_xlim(-1.5, 13.5)
+    ax.set_ylim(-4.6, 4.2)
+    ax.axis("off")
+    acc = "#00798c"
+    ink = "#23303a"
+
+    def var(xy, label, r=0.36, color="#e8f1f3"):
+        ax.add_patch(Circle(xy, r, fc=color, ec=ink, lw=1.6, zorder=3))
+        ax.text(xy[0], xy[1], label, ha="center", va="center",
+                fontsize=10, zorder=4)
+
+    def fac(xy, s=0.16, color=acc):
+        ax.add_patch(FancyBboxPatch((xy[0] - s, xy[1] - s), 2 * s, 2 * s,
+                     boxstyle="square,pad=0", fc=color, ec=ink, lw=1.1, zorder=3))
+
+    def link(a, b, color=ink, lw=1.0, ls="-"):
+        ax.plot([a[0], b[0]], [a[1], b[1]], color=color, lw=lw, ls=ls, zorder=1)
+
+    xs = [1.0, 6.0, 11.0]
+    X = [(x, 0.0) for x in xs]
+    V = [(x, 2.4) for x in xs]
+    Bpos = (6.0, -3.9)
+    var(Bpos, "B", r=0.34, color="#f2e2c2")
+    ax.text(Bpos[0], Bpos[1] - 0.62, "IMU bias", ha="center", fontsize=8,
+            color=ink)
+
+    cel = ["alt☉", "alt☾", "az☉", "az☾", "q☉", "q☾"]
+    for i, (xp, vp) in enumerate(zip(X, V)):
+        var(vp, f"V{i}", r=0.32, color="#e7efe8")
+        var(xp, f"X{i}", r=0.4)
+        # velocity <-> pose
+        link(xp, vp, color="#9bb", lw=0.8)
+        # prior / coarse GPS + attitude reference feeding this keyframe
+        fp = (xp[0] - 1.15, xp[1] + 0.9)
+        fac(fp, color="#d1495b")
+        link(fp, xp, color="#d1495b")
+        ax.text(fp[0] - 0.05, fp[1] + 0.32, "prior", ha="center", fontsize=7.5,
+                color="#a03040")
+        # celestial measurement factors fanned below the pose
+        for j, name in enumerate(cel):
+            fx = xp[0] - 1.5 + j * 0.6
+            fpos = (fx, -1.9)
+            fac(fpos, s=0.14)
+            link(fpos, xp, color=acc, lw=0.8)
+            ax.text(fx, -2.28, name, ha="center", fontsize=7.0, color=acc)
+    # IMU factors between consecutive keyframes
+    for i in range(len(X) - 1):
+        mid = ((xs[i] + xs[i + 1]) / 2, 1.2)
+        fac(mid, s=0.2, color="#edae49")
+        for pt in (X[i], V[i], X[i + 1], V[i + 1], Bpos):
+            link(mid, pt, color="#c9962f", lw=0.9)
+        ax.text(mid[0], mid[1] + 0.34, "IMU", ha="center", fontsize=8,
+                color="#a8791f")
+
+    ax.text(6.0, 3.7, "Unified factor graph — one keyframe per Sun+Moon shot",
+            ha="center", fontsize=12, weight="bold", color=ink)
+    ax.text(6.0, -2.95,
+            "alt = altitude line   az = azimuth line   q = parallactic line   "
+            "(☉ Sun, ☾ Moon)\nEach celestial factor's covariance is built from "
+            "the fused attitude references:\nIMU gravity  +  ultrawide optical "
+            "horizon  +  tele-disk orientation (bright limb / sunspot P-angle)",
+            ha="center", fontsize=8.5, color=ink)
+    fig.savefig(path, dpi=130, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -450,6 +577,65 @@ def write_results_md(data, path):
     L.append("6. **Geometry matters:** the fix is well-conditioned only when "
              "the Sun and Moon are well separated in azimuth (~90° here, a "
              "first-quarter Moon); near-parallel lines of position degrade it.\n")
+    # ------- unified full-fusion section -------
+    ab = data["ablation"]
+    L.append("## The unified factor graph — everything fused\n")
+    L.append("One graph fuses every observable at once. Per Sun+Moon shot there "
+             "is a pose `X(i)` (position + attitude), a velocity `V(i)` and a "
+             "shared IMU bias `B`; consecutive keyframes are tied by IMU "
+             "preintegration, and each shot contributes six celestial factors "
+             "(altitude, azimuth and parallactic line, for the Sun and the "
+             "Moon).\n")
+    L.append("![factor graph](results/fig_factorgraph.png)\n")
+    L.append("**Observables fused** (and where each comes from):\n")
+    L.append("- **Altitude** of Sun and Moon — tele pointing measured against "
+             "the horizon reference. *Position lines.*")
+    L.append("- **Horizon reference** = **IMU gravity** ⊕ **ultrawide optical "
+             "horizon** (acceleration-immune, dip-corrected). *Sets the altitude "
+             "covariance.*")
+    L.append("- **Azimuth** of Sun and Moon — usable because the **tele-disk "
+             "orientation** (Moon bright limb, Sun sunspot P-angle) gives a "
+             "**magnetometer-free heading**. *Position lines.*")
+    L.append("- **Parallactic angle q** of each body — the disk orientation vs. "
+             "the vertical. *Independent, horizon-free position line.*")
+    L.append("- **IMU preintegration** between shots (+ bias state). *Links the "
+             "trajectory, smooths many fixes.*")
+    L.append("- **Least-rotation gating** — selects the calm shutter instants "
+             "that feed the graph.")
+    L.append("- **Coarse position prior** (a stale ~30 km dead-reckoning). "
+             "*Disambiguates; does not drive accuracy.*\n")
+    L.append("Deployed accuracy of the **full fusion** (RMS km, "
+             f"{N_SEEDS} seeds):\n")
+    L.append("| Regime | full fusion |")
+    L.append("|---|---|")
+    for r in REGIMES:
+        L.append(f"| {REGIME_LABEL[r]} | **{cell(ab[r]['full fusion'])}** |")
+    L.append("\n### What each observable is worth (leave-one-out)\n")
+    L.append("Starting from the full fusion and removing one observable at a "
+             "time:\n")
+    keys = ["full fusion", "- ultrawide horizon", "- IMU link",
+            "- optical azimuth", "- parallactic line", "- gating",
+            "- Moon (Sun only)"]
+    L.append("| Regime | " + " | ".join(keys) + " |")
+    L.append("|" + "---|" * (len(keys) + 1))
+    for r in REGIMES:
+        L.append(f"| {REGIME_LABEL[r]} | " +
+                 " | ".join(cell(ab[r][k]) for k in keys) + " |")
+    L.append("\n![ablation](results/fig_ablation.png)\n")
+    L.append("### Deliberately left out (and why)\n")
+    L.append("- **Lunar distance for time/longitude.** The Sun-Moon separation "
+             "(or the Moon's phase) gives chronometer-free GMT — but a phone "
+             "already has an accurate clock, so time is known and this is not "
+             "needed. It would matter only for a long clock outage.")
+    L.append("- **Atmospheric refraction and the Moon's ~1° horizontal "
+             "parallax.** Treated as pre-corrected here (geometric altitudes); "
+             "`starfix.Sight` already models both and would be layered in for a "
+             "field build.")
+    L.append("- **Per-shot device attitude** is marginalised into the celestial "
+             "factor covariances (the fused gravity/horizon/disk references), "
+             "rather than carried as a free state — valid because the tilt "
+             "errors are independent shot to shot.\n")
+
     L.append("## 1. Factor graph vs. the incumbent single-fix\n")
     L.append("| Regime | starfix single-fix (per-epoch RMS) | "
              "Factor graph, no IMU | **Factor graph + IMU** |")
@@ -590,6 +776,15 @@ def write_dashboard(data, path):
                 f"<td class='hi'>{cell(hz[r]['fused'])}</td></tr>")
 
     op, hdb, fs = data["optical"], data["heading_budget"], data["fullstack"]
+    ab = data["ablation"]
+    abkeys = ["- ultrawide horizon", "- IMU link", "- optical azimuth",
+              "- parallactic line", "- gating", "- Moon (Sun only)"]
+
+    def ffrow(r):
+        return (f"<tr><td>{REGIME_LABEL[r]}</td>"
+                f"<td class='hi'>{cell(ab[r]['full fusion'])}</td>" +
+                "".join(f"<td class='mono dim'>{cell(ab[r][k])}</td>"
+                        for k in abkeys) + "</tr>")
 
     def fsrow(r):
         return (f"<tr><td>{REGIME_LABEL[r]}</td>"
@@ -649,6 +844,27 @@ padding:.05rem .5rem;font-size:.8rem;margin-right:.3rem}}
 <table><tr><th>Regime</th><th>starfix single-fix</th><th>Factor graph, no IMU</th>
 <th>Factor graph + IMU</th></tr>
 {row('land')}{row('sea')}{row('air')}</table>
+</div>
+
+<div class='card'>
+<h2>The unified factor graph — everything fused</h2>
+<p>One graph fuses every observable at once: per Sun+Moon shot a pose (position
++ attitude), a velocity and a shared IMU bias, tied across shots by IMU
+preintegration, with six celestial factors per shot (altitude, azimuth and
+parallactic line, for Sun and Moon). Each factor's covariance is built from the
+fused attitude references — IMU gravity, ultrawide optical horizon and
+tele-disk orientation.</p>
+<figure><img src='results/fig_factorgraph.png'><figcaption>Variables
+(circles) and factors (squares): priors, IMU links, and the celestial lines of
+position.</figcaption></figure>
+<table><tr><th>Regime</th><th>full fusion</th>
+<th>− ultrawide</th><th>− IMU</th><th>− opt. az</th><th>− parallactic</th>
+<th>− gating</th><th>− Moon</th></tr>
+{ffrow('land')}{ffrow('sea')}{ffrow('air')}</table>
+<p class='note'>Leave-one-out: the first column is the full fusion; each other
+column removes one observable, so a bigger number is a more valuable observable.</p>
+<figure><img src='results/fig_ablation.png'><figcaption>What each observable is
+worth inside the unified graph.</figcaption></figure>
 </div>
 
 <div class='card'>
@@ -714,7 +930,7 @@ def main():
     data = dict(main=exp_main(), gating=exp_gating(),
                 horizon=exp_horizon(), horizon_budget=exp_horizon_budget(),
                 optical=exp_optical(), heading_budget=exp_heading_budget(),
-                fullstack=exp_fullstack(),
+                fullstack=exp_fullstack(), ablation=exp_ablation(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)
@@ -724,6 +940,8 @@ def main():
     plot_gating(data["gating"], os.path.join(OUT, "fig_gating.png"))
     plot_horizon(data["horizon"], os.path.join(OUT, "fig_horizon.png"))
     plot_optical(data["optical"], os.path.join(OUT, "fig_optical.png"))
+    plot_factorgraph(os.path.join(OUT, "fig_factorgraph.png"))
+    plot_ablation(data["ablation"], os.path.join(OUT, "fig_ablation.png"))
     plot_convergence(data["convergence"], os.path.join(OUT, "fig_convergence.png"))
     plot_trigger(os.path.join(OUT, "fig_trigger.png"))
     plot_ellipse(os.path.join(OUT, "fig_ellipse.png"))

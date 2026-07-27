@@ -155,6 +155,35 @@ class TestImuFusion(unittest.TestCase):
                   pos_prior_km=100000.0)
         self.assertLess(r["rms_err_km"], 0.5)
 
+    def test_full_fusion_all_observables(self):
+        ''' The unified graph with every observable on runs, recovers zero-noise
+            truth, and beats the ultrawide-horizon-only baseline is not required
+            but it must be well under 10 km at sea. '''
+        full_sc = dict(horizon_mode="fused", use_azimuth=True,
+                       heading_source="optical", use_parallactic=True,
+                       sun_spots=True, gated=True)
+        full_sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+        sc = build_scenario("sea", random.Random(9), n_shots=12, **full_sc)
+        self.assertLess(solve(sc, **full_sv)["rms_err_km"], 10.0)
+        zn = build_scenario("sea", random.Random(9), n_shots=6, noise_scale=0.0,
+                            **full_sc)
+        self.assertLess(solve(zn, pos_prior_km=100000.0,
+                              **full_sv)["rms_err_km"], 0.5)
+
+    def test_ablation_ultrawide_matters_at_sea(self):
+        ''' Removing the ultrawide horizon from the full fusion must hurt the
+            sea fix (it is the sea's dominant observable). '''
+        full_sc = dict(horizon_mode="fused", use_azimuth=True,
+                       heading_source="optical", use_parallactic=True,
+                       sun_spots=True)
+        full_sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+        full = solve(build_scenario("sea", random.Random(11), n_shots=12,
+                                    **full_sc), **full_sv)["rms_err_km"]
+        no_uw = solve(build_scenario("sea", random.Random(11), n_shots=12,
+                                     **{**full_sc, "horizon_mode": "imu"}),
+                      **full_sv)["rms_err_km"]
+        self.assertLess(full, no_uw)
+
     def test_starfix_baseline_runs(self):
         ''' The starfix single-fix baseline produces a finite error. '''
         sc = build_scenario("land", random.Random(4), n_shots=4)

@@ -56,6 +56,29 @@ python -m imu_fusion.capture_trigger
 python -m imu_fusion.scenario
 ```
 
+## The unified fusion
+
+One factor graph fuses **every observable at once** (this is `FULL_SC`/`FULL_SV`
+in `run_study.py`):
+
+| Observable | Sensor | Role |
+|---|---|---|
+| Altitude of Sun & Moon | tele + horizon reference | position lines |
+| Horizon reference | IMU gravity ⊕ ultrawide optical horizon | sets altitude covariance |
+| Azimuth of Sun & Moon | tele-disk heading (magnetometer-free) | position lines |
+| Parallactic angle *q* | tele-disk orientation vs. vertical | horizon-free position line |
+| IMU preintegration + bias | IMU | links & smooths the trajectory |
+| Least-rotation gating | gyro | picks clean shutter instants |
+| Coarse position prior | last known / DR | disambiguation only |
+
+Per keyframe: a pose `X(i)` (position + attitude), velocity `V(i)`, shared bias
+`B`; six celestial factors per shot (alt/az/q × Sun/Moon); IMU factors between
+shots. A **leave-one-out ablation** (`exp_ablation`, `fig_ablation.png`) shows
+what each observable is worth inside the combined graph. Deliberately out:
+lunar-distance timing (a phone already has a clock), and refraction / Moon
+parallax (handled by `starfix.Sight` in a field build). Per-shot attitude is
+marginalised into the celestial factor covariances.
+
 ## Headline results
 
 Canonical epoch: **2026-03-24 12:00 UTC near Greenwich**, first-quarter Moon,

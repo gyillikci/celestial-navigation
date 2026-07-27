@@ -36,6 +36,27 @@ padding:.05rem .5rem;font-size:.8rem;margin-right:.3rem}
 </div>
 
 <div class='card'>
+<h2>The unified factor graph — everything fused</h2>
+<p>One graph fuses every observable at once: per Sun+Moon shot a pose (position
++ attitude), a velocity and a shared IMU bias, tied across shots by IMU
+preintegration, with six celestial factors per shot (altitude, azimuth and
+parallactic line, for Sun and Moon). Each factor's covariance is built from the
+fused attitude references — IMU gravity, ultrawide optical horizon and
+tele-disk orientation.</p>
+<figure><img src='results/fig_factorgraph.png'><figcaption>Variables
+(circles) and factors (squares): priors, IMU links, and the celestial lines of
+position.</figcaption></figure>
+<table><tr><th>Regime</th><th>full fusion</th>
+<th>− ultrawide</th><th>− IMU</th><th>− opt. az</th><th>− parallactic</th>
+<th>− gating</th><th>− Moon</th></tr>
+<tr><td>Land (stationary)</td><td class='hi'>4.8 ± 1.6</td><td class='mono dim'>4.8 ± 1.6</td><td class='mono dim'>15.5 ± 1.4</td><td class='mono dim'>3.7 ± 2.3</td><td class='mono dim'>3.9 ± 2.1</td><td class='mono dim'>6.7 ± 3.0</td><td class='mono dim'>6.1 ± 3.5</td></tr><tr><td>Sea (vessel + swell)</td><td class='hi'>2.5 ± 0.6</td><td class='mono dim'>15.2 ± 7.4</td><td class='mono dim'>8.1 ± 0.8</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>4.6 ± 2.0</td><td class='mono dim'>5.6 ± 3.6</td></tr><tr><td>Air (aircraft)</td><td class='hi'>2.6 ± 0.8</td><td class='mono dim'>7.9 ± 3.9</td><td class='mono dim'>8.6 ± 0.9</td><td class='mono dim'>2.1 ± 1.3</td><td class='mono dim'>2.2 ± 1.2</td><td class='mono dim'>3.1 ± 0.9</td><td class='mono dim'>5.3 ± 3.2</td></tr></table>
+<p class='note'>Leave-one-out: the first column is the full fusion; each other
+column removes one observable, so a bigger number is a more valuable observable.</p>
+<figure><img src='results/fig_ablation.png'><figcaption>What each observable is
+worth inside the unified graph.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Ultrawide optical horizon — the sea &amp; air fix</h2>
 <p>Firing the ultrawide lens with the tele gives an <em>optical</em> horizon,
 immune to the acceleration that corrupts the IMU gravity horizon. It brings the
