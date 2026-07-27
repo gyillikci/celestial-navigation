@@ -424,6 +424,26 @@ class TestImuFusion(unittest.TestCase):
         sun_head = optical_heading_sigma_deg("Sun", st)
         self.assertGreater(moon_head, sun_head)        # Sun disk is the better heading
 
+    def test_subpixel_limb_seed_robust_on_partial_phase(self):
+        ''' The limb fit must survive a DIM, half-lit (quarter-phase) disk, where
+            a brightness-threshold seed latches onto a sliver -- the gradient
+            sky-limb seed recovers the full disk. '''
+        import numpy as np
+        from math import erf
+        from imu_fusion.disk_metrology import subpixel_limb
+        H, W = 700, 900
+        cx0, cy0, R0 = 455.0, 350.0, 175.0
+        yy, xx = np.mgrid[0:H, 0:W]
+        r = np.hypot(xx - cx0, yy - cy0)
+        verf = np.vectorize(lambda t: 0.5 * (1 - erf(t / 2.0)))
+        disk = 60 * verf(r - R0)                        # dim disk (max L~60)
+        disk[xx < cx0] *= 0.03                          # left half in shadow
+        rng = np.random.RandomState(1)
+        g = np.clip(disk + rng.normal(0, 1.2, disk.shape), 0, 255)
+        fit = subpixel_limb(g)
+        self.assertLess(abs(fit["R"] - R0), 1.0)       # full disk, not a sliver
+        self.assertLess(abs(fit["cx"] - cx0), 1.0)
+
     def test_crater_ncc_recovers_roll_sub_degree(self):
         ''' Rotational NCC of the resolved Moon disk against a reference recovers
             the in-plane rotation (camera roll) to well under a degree -- the
@@ -436,6 +456,15 @@ class TestImuFusion(unittest.TestCase):
             out = recover_roll(target, ref, (cx, cy), r, coarse=1.0)
             self.assertLess(abs(out["roll"] - true), 0.5)
             self.assertGreater(out["ncc"], 0.95)
+        # Works at QUARTER phase too (left half shadowed) -- terminator crater
+        # relief is a strong fiducial, unlike the bright limb which fails at full.
+        import numpy as np
+        yy, xx = np.mgrid[0:221, 0:221]
+        halflit = ref.copy(); halflit[xx < cx] *= 0.05
+        for true in (7.0, -20.0):
+            out = recover_roll(_rotate(halflit, true, cx, cy), halflit,
+                               (cx, cy), r, coarse=1.0)
+            self.assertLess(abs(out["roll"] - true), 0.6)
 
     def test_crater_roll_beats_bright_limb_for_parallactic(self):
         ''' The crater-roll parallactic reference (horizon-free) is tighter than

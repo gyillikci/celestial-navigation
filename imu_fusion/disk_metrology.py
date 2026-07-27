@@ -51,8 +51,64 @@ def _erf_template(n, width=6.0):
     return t - t.mean()
 
 
+def _circ3(p, q, r):
+    ax, ay = p; bx, by = q; cx, cy = r
+    d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    if abs(d) < 1e-6:
+        return None
+    ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay)
+          + (cx * cx + cy * cy) * (ay - by)) / d
+    uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx)
+          + (cx * cx + cy * cy) * (bx - ax)) / d
+    return ux, uy, np.hypot(ax - ux, ay - uy)
+
+
+def _gradient_seed(g, sky, bright):
+    ''' Robust centre/radius from the SHARP sky-limb (bright inside -> dark sky
+        outside), found by gradient + a small deterministic RANSAC circle.  Works
+        when the disk is only partly lit (a crescent/quarter), where a brightness
+        threshold would latch onto a sliver. '''
+    gy, gx = np.gradient(g)
+    gm = np.hypot(gx, gy)
+    ey, ex = np.nonzero(gm > np.percentile(gm, 99.2))
+    if len(ex) < 30:
+        return None
+    cx0, cy0 = ex.mean(), ey.mean()
+    ux, uy = ex - cx0, ey - cy0
+    L = np.hypot(ux, uy) + 1e-9
+    ox = np.clip((ex + 6 * ux / L).astype(int), 0, g.shape[1] - 1)
+    oy = np.clip((ey + 6 * uy / L).astype(int), 0, g.shape[0] - 1)
+    ix = np.clip((ex - 6 * ux / L).astype(int), 0, g.shape[1] - 1)
+    iy = np.clip((ey - 6 * uy / L).astype(int), 0, g.shape[0] - 1)
+    m = ((g[oy, ox] < sky + 0.15 * (bright - sky))
+         & (g[iy, ix] > sky + 0.20 * (bright - sky)))
+    ex, ey = ex[m].astype(float), ey[m].astype(float)
+    if len(ex) < 30:
+        return None
+    rmax = 0.6 * min(g.shape)
+    rs = np.random.RandomState(0)               # deterministic
+    best, bn = None, 0
+    for _ in range(3000):
+        i, j, k = rs.randint(0, len(ex), 3)
+        c = _circ3((ex[i], ey[i]), (ex[j], ey[j]), (ex[k], ey[k]))
+        if not c or not (20 < c[2] < rmax):
+            continue
+        n = (np.abs(np.hypot(ex - c[0], ey - c[1]) - c[2]) < 2).sum()
+        if n > bn:
+            bn, best = n, c
+    if best is None:
+        return None
+    cx, cy, r = best
+    inl = np.abs(np.hypot(ex - cx, ey - cy) - r) < 2.5
+    return _circle_fit(ex[inl], ey[inl])
+
+
 def _seed(g, sky, bright):
-    ''' Rough centre/radius from a simple brightness threshold. '''
+    ''' Rough centre/radius.  Prefer the robust gradient sky-limb seed; fall back
+        to a brightness threshold only if that fails. '''
+    grad = _gradient_seed(g, sky, bright)
+    if grad is not None and grad[2] > 0.05 * min(g.shape):
+        return grad
     lit = g > sky + 0.14 * (bright - sky)
     ys, xs = np.nonzero(lit)
     return xs.mean(), ys.mean(), float(np.sqrt(lit.sum() / np.pi))
