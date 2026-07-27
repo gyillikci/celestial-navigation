@@ -107,14 +107,49 @@ def moon_limb_available(time_iso: str,
 
 @dataclass(frozen=True)
 class OpticalDiskSpec:
-    ''' How well the tele image pins the disk-feature orientation. '''
-    # Floor on feature-axis orientation from model/libration/limb-fit residual.
-    moon_axis_floor_deg: float = 0.35
+    ''' How well the tele image pins the disk-feature orientation.
+
+        Two DISTINCT error sources were conflated in an earlier single 0.35 deg
+        floor; measuring real iPhone Moon frames (sub-pixel NCC limb fit, see
+        `disk_metrology.py`) showed they differ by ~100x and must be split:
+
+          * `edge_px_sigma` -- per-limb-point localisation.  A sub-pixel NCC fit
+            against an erf edge template reaches ~0.03 px on a sharp disk (full
+            Moon: circle RMSE 0.010 px; first quarter: 0.038 px), so the old
+            0.5 px was ~15x pessimistic.  This governs the GEOMETRIC precision
+            (centre, radius, plate scale, crater/feature axis) -- now excellent.
+          * `moon_axis_floor_deg` -- the residual of a geometric FEATURE axis
+            (crater/libration), well under 0.1 deg with a sub-pixel limb.
+
+        The Moon's BRIGHT-LIMB heading is a THIRD thing and is NOT edge-limited:
+        it floors ~1.8 deg (phase geometry + mare albedo + terminator shadow;
+        measured chi ~= 2 deg at first quarter) and DIVERGES toward full/new.
+        See `bright_limb_sigma_deg`.  So a sharp Moon is a superb angular-size
+        ruler but only a ~2 deg compass from its bright limb.
+    '''
+    moon_axis_floor_deg: float = 0.10       # geometric feature (crater) axis
     sun_axis_floor_deg: float = 0.60        # sunspot centroiding, when present
-    edge_px_sigma: float = 0.5              # per-edge-point localisation
+    edge_px_sigma: float = 0.05             # per-limb-point localisation (NCC)
+    bright_limb_floor_deg: float = 1.8      # best-case bright-limb PA (half phase)
 
 
 DEFAULT_DISK = OpticalDiskSpec()
+
+
+def bright_limb_sigma_deg(k: float, disk: "OpticalDiskSpec" = None) -> float:
+    ''' 1-sigma of the Moon's BRIGHT-LIMB position angle vs illuminated
+        fraction k, in degrees.
+
+        Not an edge-localisation error: even with a sub-pixel limb the bright
+        limb's direction is set by the terminator/cusp geometry, which is
+        sharpest at half phase and DEGENERATE at full (whole limb lit) and new
+        (nothing lit).  Modelled as a floor divided by the phase "wedge"
+        2*sqrt(k(1-k)) (=1 at half, ->0 at full/new).  Matches the measured
+        ~2 deg at first quarter and the observed degeneracy on a full-Moon frame.
+    '''
+    disk = disk or DEFAULT_DISK
+    wedge = 2.0 * sqrt(max(k * (1.0 - k), 0.0))
+    return disk.bright_limb_floor_deg / max(wedge, 0.06)   # caps ~30 deg near full
 
 
 def orientation_sigma_deg(body: str, state: KinematicState,
@@ -158,8 +193,27 @@ def optical_heading_sigma_deg(body: str, state: KinematicState,
                               disk: OpticalDiskSpec = DEFAULT_DISK) -> float:
     ''' Heading (azimuth-reference) sigma from the disk orientation [deg].
         The absolute celestial axis in the image yields the platform heading
-        without a magnetometer; precision ~ the orientation-fit sigma. '''
+        without a magnetometer; precision ~ the orientation-fit sigma.
+
+        NOTE: for the Moon this is the sunspot-free FEATURE-axis heading; the
+        realistic BRIGHT-LIMB heading is much looser and phase-dependent -- use
+        `moon_bright_limb_heading_sigma_deg`.  In DAYTIME both Sun and Moon are
+        up, and the Sun's sharp disk gives a far better heading than the Moon's
+        bright limb, so the Moon-limb compass is really a night / Sun-occluded
+        backup (see module notes). '''
     return orientation_sigma_deg(body, state, cam, disk)
+
+
+def moon_bright_limb_heading_sigma_deg(k: float, state: KinematicState,
+                                       disk: OpticalDiskSpec = DEFAULT_DISK
+                                       ) -> float:
+    ''' Heading sigma [deg] from the Moon's BRIGHT LIMB at illuminated fraction
+        k -- the phase-limited bright-limb PA sigma plus exposure rotation, in
+        quadrature.  This is the number to feed a Moon azimuth factor; it is
+        ~2 deg near half phase and diverges toward full, so when the Sun is
+        observable its direct disk gives a much stronger heading. '''
+    rot_deg = degrees(state.ang_rate * state.exposure_s)
+    return sqrt(bright_limb_sigma_deg(k, disk) ** 2 + rot_deg ** 2)
 
 
 def summarise(time_iso: str = "2026-03-24 12:00:00") -> str:

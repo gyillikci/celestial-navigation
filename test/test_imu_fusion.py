@@ -362,6 +362,47 @@ class TestImuFusion(unittest.TestCase):
         self.assertAlmostEqual(parse_angle_string("-1:30"), -1.5, places=6)
         self.assertAlmostEqual(parse_angle_string("12:30"), 12.5, places=6)
 
+    def test_subpixel_limb_recovers_synthetic_disk(self):
+        ''' The NCC sub-pixel limb fit recovers a known synthetic disk centre
+            and radius to well under 0.1 px. '''
+        import numpy as np
+        from math import erf
+        from imu_fusion.disk_metrology import subpixel_limb, plate_scale_arcsec_px
+        H, W = 700, 900
+        cx0, cy0, R0 = 451.3, 352.8, 180.6
+        yy, xx = np.mgrid[0:H, 0:W]
+        r = np.hypot(xx - cx0, yy - cy0)
+        # bright disk on dark sky with an erf-profile limb (~2 px), mild noise
+        verf = np.vectorize(lambda t: 0.5 * (1 - erf(t / 2.0)))
+        g = 12 + 200 * verf(r - R0)
+        rng = np.random.RandomState(0)
+        g = np.clip(g + rng.normal(0, 1.5, g.shape), 0, 255)
+        fit = subpixel_limb(g)
+        self.assertLess(abs(fit["cx"] - cx0), 0.1)
+        self.assertLess(abs(fit["cy"] - cy0), 0.1)
+        self.assertLess(abs(fit["R"] - R0), 0.15)     # unbiased to <0.15 px
+        self.assertLess(fit["rmse"], 0.5)              # sub-pixel scatter
+        self.assertGreater(plate_scale_arcsec_px(fit["R"]), 0.0)
+
+    def test_bright_limb_sigma_is_phase_limited_and_degenerate_at_full(self):
+        ''' Bright-limb heading sigma is ~2 deg near half phase, minimal there,
+            and diverges toward full Moon; and it is always looser than the Sun's
+            sharp-disk heading (so daytime leans on the Sun). '''
+        from imu_fusion.optical_attitude import (
+            bright_limb_sigma_deg, moon_bright_limb_heading_sigma_deg,
+            optical_heading_sigma_deg)
+        from imu_fusion.iphone_model import KinematicState
+        half = bright_limb_sigma_deg(0.5)
+        gibbous = bright_limb_sigma_deg(0.85)
+        near_full = bright_limb_sigma_deg(0.99)
+        self.assertLess(half, 2.5)                     # ~1.8 deg at half phase
+        self.assertGreater(gibbous, half)              # worse toward full
+        self.assertGreater(near_full, 8.0)             # diverging near full
+        st = KinematicState(ang_rate=0.01, lin_accel=0.05)
+        moon_head = moon_bright_limb_heading_sigma_deg(0.5, st)
+        sun_head = optical_heading_sigma_deg("Sun", st)
+        self.assertGreater(moon_head, sun_head)        # Sun disk is the better heading
+
     def test_groundtruth_matches_independent_ephemeris(self):
         ''' If an independent engine is installed, the almanac's Sun/Moon GHA and
             Dec must agree with it to well under an arc-minute over a time grid.

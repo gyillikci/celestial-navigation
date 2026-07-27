@@ -361,9 +361,15 @@ def exp_ablation(n_shots=12):
 
 
 def exp_heading_budget():
-    ''' Heading sigma (deg): magnetometer vs optical disk orientation. '''
-    from .optical_attitude import optical_heading_sigma_deg
+    ''' Heading sigma (deg): magnetometer vs optical disk.  The Moon column is
+        its realistic phase-limited BRIGHT-LIMB compass (~2 deg), not the
+        geometric feature axis -- so it reads far looser than the Sun's disk,
+        which is why daytime heading should lean on the Sun. '''
+    from .optical_attitude import (optical_heading_sigma_deg,
+                                   moon_bright_limb_heading_sigma_deg,
+                                   moon_illuminated_fraction)
     from .iphone_model import heading_sigma_arcmin
+    k = moon_illuminated_fraction(EPOCH.strftime("%Y-%m-%d %H:%M:%S"))
     rep = {"land": KinematicState(0.02, 0.03),
            "sea": KinematicState(0.10, 0.20),
            "air": KinematicState(0.05, 0.30)}
@@ -371,7 +377,7 @@ def exp_heading_budget():
     for r in REGIMES:
         st_ = rep[r]
         out[r] = dict(mag=heading_sigma_arcmin(st_, DEFAULT_IMU) / 60.0,
-                      moon=optical_heading_sigma_deg("Moon", st_),
+                      moon=moon_bright_limb_heading_sigma_deg(k, st_),
                       sun=optical_heading_sigma_deg("Sun", st_))
     return out
 
@@ -972,13 +978,16 @@ def write_results_md(data, path):
     hdb = data["heading_budget"]
     op = data["optical"]
     L.append(f"5. **The tele lens is more than a pointer.** Resolving the disk "
-             f"— the Moon's bright limb, the Sun's sunspot P-angle — gives a "
-             f"magnetometer-free heading (~{hdb['sea']['moon']:.1f}° vs "
-             f"~{hdb['sea']['mag']:.0f}° for the phone compass) that makes the "
-             f"azimuth lines usable, plus a horizon-free parallactic position "
-             f"line. On a weak (IMU) horizon at sea the two together cut the fix "
-             f"from {op['sea']['alt'][0]:.0f} km to "
-             f"{op['sea']['optical'][0]:.0f} km.\n")
+             f"gives a magnetometer-free heading, but the two bodies are not "
+             f"equal: the **Sun's** sharp disk yields ~{hdb['sea']['sun']:.1f}° "
+             f"(vs ~{hdb['sea']['mag']:.0f}° for the phone compass), while the "
+             f"**Moon's bright limb** is only ~{hdb['sea']['moon']:.1f}° "
+             f"(phase-limited, and degenerate near full) — *looser than the "
+             f"magnetometer*. So in daytime the heading should come from the "
+             f"Sun; the Moon's limb is a night / Sun-occluded backup. Either way "
+             f"the disk adds a horizon-free parallactic line; on a weak (IMU) "
+             f"horizon at sea the optical stack cuts the fix from "
+             f"{op['sea']['alt'][0]:.0f} km to {op['sea']['optical'][0]:.0f} km.\n")
     L.append("6. **Geometry matters:** the fix is well-conditioned only when "
              "the Sun and Moon are well separated in azimuth (~90° here, a "
              "first-quarter Moon); near-parallel lines of position degrade it.\n")
@@ -1570,11 +1579,14 @@ back to the IMU.</p>
 
 <div class='card'>
 <h2>The tele lens as an instrument, not a pointer</h2>
-<p>Resolving the disk — the Moon's bright limb, the Sun's sunspot P-angle —
-gives an absolute celestial orientation: a <em>magnetometer-free heading</em>
-(which makes the azimuth lines of position usable) and a horizon-free
-<em>parallactic</em> position line. Shown on the weak IMU horizon so the gain is
-visible; the Moon's limb is the workhorse (the Sun needs a filter and spots).</p>
+<p>Resolving the disk gives an absolute celestial orientation: a
+<em>magnetometer-free heading</em> (which makes the azimuth lines of position
+usable) and a horizon-free <em>parallactic</em> position line. But the two bodies
+are not equal as a compass — the <b>Sun's</b> sharp disk is precise, while the
+<b>Moon's bright limb</b> is only ~2° (phase-limited, degenerate near full),
+looser than a magnetometer. In daytime, with both up, take the heading from the
+<b>Sun</b>; the Moon's limb is a night / Sun-occluded backup. Shown on the weak
+IMU horizon so the gain is visible.</p>
 <table><tr><th>Regime</th><th>heading σ (mag / optical)</th><th>alt only</th>
 <th>+az (mag)</th><th>+az (optical)</th><th>+optical &amp; parallactic</th></tr>
 {orow('land')}{orow('sea')}{orow('air')}</table>

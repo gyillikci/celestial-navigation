@@ -49,7 +49,7 @@ position.</figcaption></figure>
 <table><tr><th>Regime</th><th>full fusion</th>
 <th>− ultrawide</th><th>− IMU</th><th>− opt. az</th><th>− parallactic</th>
 <th>− gating</th><th>− Moon</th></tr>
-<tr><td>Land (stationary)</td><td class='hi'>4.8 ± 1.6</td><td class='mono dim'>4.8 ± 1.6</td><td class='mono dim'>15.5 ± 1.4</td><td class='mono dim'>3.7 ± 2.3</td><td class='mono dim'>3.9 ± 2.1</td><td class='mono dim'>6.7 ± 3.0</td><td class='mono dim'>6.1 ± 3.5</td></tr><tr><td>Sea (vessel + swell)</td><td class='hi'>2.5 ± 0.6</td><td class='mono dim'>15.2 ± 7.4</td><td class='mono dim'>8.1 ± 0.8</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>4.6 ± 2.0</td><td class='mono dim'>5.6 ± 3.6</td></tr><tr><td>Air (aircraft)</td><td class='hi'>2.6 ± 0.8</td><td class='mono dim'>7.9 ± 3.9</td><td class='mono dim'>8.6 ± 0.9</td><td class='mono dim'>2.1 ± 1.3</td><td class='mono dim'>2.2 ± 1.2</td><td class='mono dim'>3.1 ± 0.9</td><td class='mono dim'>5.3 ± 3.2</td></tr></table>
+<tr><td>Land (stationary)</td><td class='hi'>3.8 ± 1.6</td><td class='mono dim'>3.8 ± 1.6</td><td class='mono dim'>14.3 ± 1.5</td><td class='mono dim'>3.1 ± 2.0</td><td class='mono dim'>4.1 ± 2.3</td><td class='mono dim'>5.5 ± 3.0</td><td class='mono dim'>6.1 ± 3.5</td></tr><tr><td>Sea (vessel + swell)</td><td class='hi'>2.2 ± 0.6</td><td class='mono dim'>16.0 ± 8.2</td><td class='mono dim'>7.7 ± 0.8</td><td class='mono dim'>1.8 ± 1.0</td><td class='mono dim'>2.1 ± 1.2</td><td class='mono dim'>4.0 ± 1.8</td><td class='mono dim'>5.6 ± 3.6</td></tr><tr><td>Air (aircraft)</td><td class='hi'>2.3 ± 0.8</td><td class='mono dim'>6.5 ± 4.5</td><td class='mono dim'>8.1 ± 0.9</td><td class='mono dim'>1.9 ± 1.1</td><td class='mono dim'>2.2 ± 1.3</td><td class='mono dim'>2.6 ± 0.9</td><td class='mono dim'>5.3 ± 3.2</td></tr></table>
 <p class='note'>Leave-one-out: the first column is the full fusion; each other
 column removes one observable, so a bigger number is a more valuable observable.</p>
 <figure><img src='results/fig_ablation.png'><figcaption>What each observable is
@@ -65,7 +65,7 @@ bounded</b> — with the same current-position accuracy. Fixes are low-rate; IMU
 dead-reckoning covers the gaps.</p>
 <table><tr><th>Regime</th><th>batch @ 30 shots</th>
 <th>streaming update</th><th>speedup</th><th>final-error (batch / stream)</th></tr>
-<tr><td>Land (stationary)</td><td class='mono dim'>300 ms</td><td class='mono hi'>5.5 ms</td><td class='mono'>55×</td><td class='mono'>2.06 / 2.08 km</td></tr><tr><td>Sea (vessel + swell)</td><td class='mono dim'>305 ms</td><td class='mono hi'>5.2 ms</td><td class='mono'>58×</td><td class='mono'>1.07 / 1.09 km</td></tr><tr><td>Air (aircraft)</td><td class='mono dim'>296 ms</td><td class='mono hi'>5.3 ms</td><td class='mono'>55×</td><td class='mono'>1.20 / 1.21 km</td></tr></table>
+<tr><td>Land (stationary)</td><td class='mono dim'>332 ms</td><td class='mono hi'>5.6 ms</td><td class='mono'>59×</td><td class='mono'>2.03 / 2.05 km</td></tr><tr><td>Sea (vessel + swell)</td><td class='mono dim'>333 ms</td><td class='mono hi'>5.2 ms</td><td class='mono'>64×</td><td class='mono'>0.98 / 0.99 km</td></tr><tr><td>Air (aircraft)</td><td class='mono dim'>336 ms</td><td class='mono hi'>5.1 ms</td><td class='mono'>66×</td><td class='mono'>1.15 / 1.15 km</td></tr></table>
 <figure><img src='results/fig_realtime.png'><figcaption>Per-fix latency vs trip
 length: batch grows, streaming stays flat under the real-time budget.</figcaption></figure>
 </div>
@@ -83,21 +83,24 @@ back to the IMU.</p>
 
 <div class='card'>
 <h2>The tele lens as an instrument, not a pointer</h2>
-<p>Resolving the disk — the Moon's bright limb, the Sun's sunspot P-angle —
-gives an absolute celestial orientation: a <em>magnetometer-free heading</em>
-(which makes the azimuth lines of position usable) and a horizon-free
-<em>parallactic</em> position line. Shown on the weak IMU horizon so the gain is
-visible; the Moon's limb is the workhorse (the Sun needs a filter and spots).</p>
+<p>Resolving the disk gives an absolute celestial orientation: a
+<em>magnetometer-free heading</em> (which makes the azimuth lines of position
+usable) and a horizon-free <em>parallactic</em> position line. But the two bodies
+are not equal as a compass — the <b>Sun's</b> sharp disk is precise, while the
+<b>Moon's bright limb</b> is only ~2° (phase-limited, degenerate near full),
+looser than a magnetometer. In daytime, with both up, take the heading from the
+<b>Sun</b>; the Moon's limb is a night / Sun-occluded backup. Shown on the weak
+IMU horizon so the gain is visible.</p>
 <table><tr><th>Regime</th><th>heading σ (mag / optical)</th><th>alt only</th>
 <th>+az (mag)</th><th>+az (optical)</th><th>+optical &amp; parallactic</th></tr>
-<tr><td>Land (stationary)</td><td>1.0° / 0.4°</td><td>5.4 ± 0.8</td><td>3.6 ± 1.9</td><td>3.5 ± 1.8</td><td class='hi'>3.2 ± 1.3</td></tr><tr><td>Sea (vessel + swell)</td><td>1.0° / 0.4°</td><td>28.6 ± 15.8</td><td>17.4 ± 11.0</td><td>14.9 ± 6.4</td><td class='hi'>12.4 ± 6.2</td></tr><tr><td>Air (aircraft)</td><td>1.0° / 0.4°</td><td>12.0 ± 6.0</td><td>8.4 ± 5.4</td><td>8.1 ± 5.5</td><td class='hi'>5.2 ± 2.4</td></tr></table>
+<tr><td>Land (stationary)</td><td>1.0° / 1.9°</td><td>5.4 ± 0.8</td><td>3.6 ± 1.9</td><td>3.6 ± 1.9</td><td class='hi'>2.6 ± 0.9</td></tr><tr><td>Sea (vessel + swell)</td><td>1.0° / 1.9°</td><td>28.6 ± 15.8</td><td>17.3 ± 11.0</td><td>15.3 ± 11.4</td><td class='hi'>11.4 ± 3.8</td></tr><tr><td>Air (aircraft)</td><td>1.0° / 1.9°</td><td>12.0 ± 6.0</td><td>8.4 ± 5.4</td><td>7.9 ± 5.2</td><td class='hi'>4.8 ± 1.9</td></tr></table>
 <p class="note"><b>These numbers use the weak IMU horizon on purpose</b>, to
 isolate the optical-disk contribution — not a regression versus the ~2&nbsp;km
 ultrawide horizon. Stacking <em>everything</em> (ultrawide horizon + optical
 disk, Moon&nbsp;+&nbsp;Sun) gives the deployed accuracy:</p>
 <table><tr><th>Regime</th><th>ultrawide horizon only</th>
 <th>full stack (horizon + optical)</th></tr>
-<tr><td>Land (stationary)</td><td>5.2 ± 2.2</td><td class='hi'>4.1 ± 2.1</td></tr><tr><td>Sea (vessel + swell)</td><td>2.7 ± 1.2</td><td class='hi'>2.5 ± 1.1</td></tr><tr><td>Air (aircraft)</td><td>2.8 ± 1.2</td><td class='hi'>2.6 ± 1.0</td></tr></table>
+<tr><td>Land (stationary)</td><td>5.2 ± 2.2</td><td class='hi'>4.5 ± 2.0</td></tr><tr><td>Sea (vessel + swell)</td><td>2.7 ± 1.2</td><td class='hi'>2.4 ± 1.1</td></tr><tr><td>Air (aircraft)</td><td>2.8 ± 1.2</td><td class='hi'>2.6 ± 1.2</td></tr></table>
 </div>
 
 <div class='card'>
@@ -185,7 +188,7 @@ at sea even the calmest swell instant is too tilted, so the swell floor
 dominates and a gimbal/mount is needed.</p>
 <table><tr><th>Regime</th><th>gated σ</th><th>ungated σ</th><th>gated fix</th>
 <th>ungated fix</th></tr>
-<tr><td>Land (stationary)</td><td>6.4′</td><td>18.1′</td><td>5.7 ± 2.4</td><td>7.7 ± 4.8</td></tr><tr><td>Sea (vessel + swell)</td><td>95.9′</td><td>402.6′</td><td>26.2 ± 14.5</td><td>23.1 ± 12.5</td></tr><tr><td>Air (aircraft)</td><td>22.2′</td><td>138.3′</td><td>8.6 ± 3.1</td><td>16.4 ± 9.6</td></tr></table>
+<tr><td>Land (stationary)</td><td>6.4′</td><td>18.1′</td><td>5.7 ± 2.4</td><td>7.7 ± 4.8</td></tr><tr><td>Sea (vessel + swell)</td><td>95.9′</td><td>402.6′</td><td>26.2 ± 14.5</td><td>23.1 ± 12.6</td></tr><tr><td>Air (aircraft)</td><td>22.2′</td><td>138.3′</td><td>8.6 ± 3.1</td><td>16.4 ± 9.6</td></tr></table>
 </div>
 
 <div class='card'><h2>Figures</h2><figure><img src='results/fig_main.png'><figcaption>Factor graph vs incumbent single-fix</figcaption></figure><figure><img src='results/fig_horizon.png'><figcaption>Ultrawide optical horizon rescues sea & air</figcaption></figure><figure><img src='results/fig_optical.png'><figcaption>Tele-disk heading + parallactic line</figcaption></figure><figure><img src='results/fig_gating.png'><figcaption>Least-rotation shutter</figcaption></figure><figure><img src='results/fig_convergence.png'><figcaption>Error vs number of shots</figcaption></figure><figure><img src='results/fig_trigger.png'><figcaption>Trigger picking calm instants</figcaption></figure><figure><img src='results/fig_ellipse.png'><figcaption>Fix with covariance ellipse</figcaption></figure></div>

@@ -33,7 +33,9 @@ from .ultrawide_horizon import (UltrawideHorizonSpec, DEFAULT_UW,
                                 horizon_reference_sigma_arcmin,
                                 horizon_reference_sigma_lens)
 from .optical_attitude import (parallactic_angle_deg, parallactic_sigma_deg,
-                               optical_heading_sigma_deg, moon_limb_available)
+                               optical_heading_sigma_deg, moon_limb_available,
+                               moon_bright_limb_heading_sigma_deg,
+                               moon_illuminated_fraction)
 from .visual_anchor import anchor_horizon_sigma_arcmin, coast_attitude_arcmin
 from .cloud import CloudSpec, body_clear_flags
 from .capture_trigger import PROFILES, simulate_trace, find_shutter_instants
@@ -232,9 +234,17 @@ def build_scenario(regime: str,
             meas_alt = t_alt + noise_scale * rng.gauss(0.0, a_sig / 60.0)
 
             # Azimuth line of position: heading from magnetometer or from the
-            # optical disk orientation (magnetometer-free).
+            # optical disk orientation (magnetometer-free).  In daytime the Sun's
+            # sharp disk is the strong heading; the Moon contributes only its
+            # phase-limited BRIGHT-LIMB compass (~2 deg, worse near full), so the
+            # graph naturally leans on the Sun -- exactly why the Moon's bright
+            # limb is a backup, not the primary daytime heading.
             if heading_source == "optical":
-                h_sig = optical_heading_sigma_deg(body, kin) * 60.0
+                if body.lower() == "moon":
+                    k_illum = moon_illuminated_fraction(iso)
+                    h_sig = moon_bright_limb_heading_sigma_deg(k_illum, kin) * 60.0
+                else:
+                    h_sig = optical_heading_sigma_deg(body, kin) * 60.0
             else:
                 h_sig = heading_sigma_arcmin(kin, imu)
             meas_az = (t_az + noise_scale * rng.gauss(0.0, h_sig / 60.0)

@@ -12,7 +12,7 @@
 
 4. **The ultrawide camera fixes the sea (and air) problem.** Shooting the ultrawide horizon at the same instant as the tele body gives an *optical* horizon that is immune to acceleration. It drops the sea fix from 27 km to **2.0 km** and the air fix from 9 km to **2.2 km** — bringing the moving platforms to land-class accuracy. On land there is no true sea horizon, so it falls back to the IMU (no change).
 
-5. **The tele lens is more than a pointer.** Resolving the disk — the Moon's bright limb, the Sun's sunspot P-angle — gives a magnetometer-free heading (~0.4° vs ~1° for the phone compass) that makes the azimuth lines usable, plus a horizon-free parallactic position line. On a weak (IMU) horizon at sea the two together cut the fix from 29 km to 12 km.
+5. **The tele lens is more than a pointer.** Resolving the disk gives a magnetometer-free heading, but the two bodies are not equal: the **Sun's** sharp disk yields ~0.6° (vs ~1° for the phone compass), while the **Moon's bright limb** is only ~1.9° (phase-limited, and degenerate near full) — *looser than the magnetometer*. So in daytime the heading should come from the Sun; the Moon's limb is a night / Sun-occluded backup. Either way the disk adds a horizon-free parallactic line; on a weak (IMU) horizon at sea the optical stack cuts the fix from 29 km to 11 km.
 
 6. **Geometry matters:** the fix is well-conditioned only when the Sun and Moon are well separated in azimuth (~90° here, a first-quarter Moon); near-parallel lines of position degrade it.
 
@@ -51,9 +51,9 @@ Deployed accuracy of the **full fusion** (RMS km, 8 seeds):
 
 | Regime | full fusion |
 |---|---|
-| Land (stationary) | **4.8 ± 1.6** |
-| Sea (vessel + swell) | **2.5 ± 0.6** |
-| Air (aircraft) | **2.6 ± 0.8** |
+| Land (stationary) | **3.8 ± 1.6** |
+| Sea (vessel + swell) | **2.2 ± 0.6** |
+| Air (aircraft) | **2.3 ± 0.8** |
 
 ### What each observable is worth (leave-one-out)
 
@@ -61,9 +61,9 @@ Starting from the full fusion and removing one observable at a time:
 
 | Regime | full fusion | - ultrawide horizon | - IMU link | - optical azimuth | - parallactic line | - gating | - Moon (Sun only) |
 |---|---|---|---|---|---|---|---|
-| Land (stationary) | 4.8 ± 1.6 | 4.8 ± 1.6 | 15.5 ± 1.4 | 3.7 ± 2.3 | 3.9 ± 2.1 | 6.7 ± 3.0 | 6.1 ± 3.5 |
-| Sea (vessel + swell) | 2.5 ± 0.6 | 15.2 ± 7.4 | 8.1 ± 0.8 | 2.0 ± 1.1 | 2.0 ± 1.1 | 4.6 ± 2.0 | 5.6 ± 3.6 |
-| Air (aircraft) | 2.6 ± 0.8 | 7.9 ± 3.9 | 8.6 ± 0.9 | 2.1 ± 1.3 | 2.2 ± 1.2 | 3.1 ± 0.9 | 5.3 ± 3.2 |
+| Land (stationary) | 3.8 ± 1.6 | 3.8 ± 1.6 | 14.3 ± 1.5 | 3.1 ± 2.0 | 4.1 ± 2.3 | 5.5 ± 3.0 | 6.1 ± 3.5 |
+| Sea (vessel + swell) | 2.2 ± 0.6 | 16.0 ± 8.2 | 7.7 ± 0.8 | 1.8 ± 1.0 | 2.1 ± 1.2 | 4.0 ± 1.8 | 5.6 ± 3.6 |
+| Air (aircraft) | 2.3 ± 0.8 | 6.5 ± 4.5 | 8.1 ± 0.9 | 1.9 ± 1.1 | 2.2 ± 1.3 | 2.6 ± 0.9 | 5.3 ± 3.2 |
 
 ![ablation](results/fig_ablation.png)
 
@@ -81,9 +81,9 @@ Per-fix latency at 30 shots (host CPU, single thread; an A19 Pro is comparable):
 
 | Regime | batch re-solve | **streaming update** | speedup | final-error parity (batch / stream) |
 |---|---|---|---|---|
-| Land (stationary) | 300 ms | **5.5 ms** | 55× | 2.06 / 2.08 km |
-| Sea (vessel + swell) | 305 ms | **5.2 ms** | 58× | 1.07 / 1.09 km |
-| Air (aircraft) | 296 ms | **5.3 ms** | 55× | 1.20 / 1.21 km |
+| Land (stationary) | 332 ms | **5.6 ms** | 59× | 2.03 / 2.05 km |
+| Sea (vessel + swell) | 333 ms | **5.2 ms** | 64× | 0.98 / 0.99 km |
+| Air (aircraft) | 336 ms | **5.1 ms** | 66× | 1.15 / 1.15 km |
 
 ![realtime](results/fig_realtime.png)
 
@@ -95,9 +95,9 @@ A clip-on afocal optic triples the tele focal length (sharper pointing, bigger d
 
 | Regime | 1× | 2× | 3× |
 |---|---|---|---|
-| Land (stationary) | 3.1 ± 1.7 | 3.1 ± 1.7 | 3.1 ± 1.7 |
-| Sea (vessel + swell) | 1.5 ± 0.8 | 1.5 ± 0.8 | 1.5 ± 0.8 |
-| Air (aircraft) | 1.6 ± 0.9 | 1.6 ± 0.9 | 1.6 ± 0.9 |
+| Land (stationary) | 2.9 ± 1.2 | 2.9 ± 1.2 | 2.9 ± 1.2 |
+| Sea (vessel + swell) | 1.4 ± 0.7 | 1.4 ± 0.7 | 1.4 ± 0.7 |
+| Air (aircraft) | 1.5 ± 0.8 | 1.5 ± 0.8 | 1.5 ± 0.8 |
 
 Why: the altitude error budget is dominated by the horizon (optical ~3.8′, IMU ~70′ at sea), while camera pointing is ~0.03′ — already ~100× smaller, and 3× zoom only shrinks that already-negligible term. Heading is floored by astronomical/model residuals (libration, seeing, P-angle) that zoom cannot improve.
 
@@ -115,8 +115,8 @@ So it is the reverse of *"wide lens for high hours"*: **the wide lens is the LOW
 
 | Regime | wide-only | ultrawide | adaptive |
 |---|---|---|---|
-| Sea (vessel + swell) | 14.7 ± 7.6 | 1.5 ± 1.0 | 1.5 ± 1.0 |
-| Air (aircraft) | 4.8 ± 2.9 | 1.7 ± 0.9 | 1.7 ± 0.9 |
+| Sea (vessel + swell) | 16.0 ± 4.9 | 1.4 ± 1.0 | 1.4 ± 1.0 |
+| Air (aircraft) | 4.8 ± 2.5 | 1.5 ± 1.0 | 1.5 ± 1.0 |
 
 Practical guidance: for this method prefer **moderate-to-low body altitudes (~15–30°)** — the wide lens then delivers the sharpest horizon and refraction is still manageable (below ~15° refraction/dip uncertainty grows; `starfix` models it). High-noon sights are the worst case for the optical horizon.
 
@@ -137,9 +137,9 @@ The gyro alone diverges (~0.17′/s); the accelerometer is bounded but wrecked b
 
 | Regime | optical horizon: no anchor / anchor | no optical horizon: no anchor / anchor |
 |---|---|---|
-| Land (stationary) | 4.3 ± 1.5 / **2.1 ± 0.8** | 4.3 ± 1.5 / **2.1 ± 0.8** |
-| Sea (vessel + swell) | 2.1 ± 0.7 / **1.6 ± 0.6** | 16.2 ± 8.4 / **2.3 ± 0.9** |
-| Air (aircraft) | 2.3 ± 0.8 / **1.7 ± 0.6** | 8.3 ± 3.0 / **2.3 ± 0.8** |
+| Land (stationary) | 3.8 ± 1.5 / **1.8 ± 0.6** | 3.8 ± 1.5 / **1.8 ± 0.6** |
+| Sea (vessel + swell) | 1.9 ± 0.5 / **1.4 ± 0.4** | 19.6 ± 4.3 / **2.1 ± 0.7** |
+| Air (aircraft) | 2.1 ± 0.7 / **1.5 ± 0.5** | 7.8 ± 2.6 / **2.0 ± 0.7** |
 
 ![anchor fix](results/fig_anchor_fix.png)
 
@@ -153,9 +153,9 @@ Cloud hits both the **sight** for that body (no line of position) and the **visu
 
 | Regime | 0% cloud | 15% cloud | 30% cloud | 45% cloud | 60% cloud | 75% cloud |
 |---|---|---|---|---|---|---|
-| Land (stationary) | 2.0 ± 0.8 | 2.4 ± 0.8 | 3.2 ± 1.0 | 3.4 ± 1.6 | 5.0 ± 4.5 | 4.7 ± 2.3 |
-| Sea (vessel + swell) | 1.6 ± 0.7 | 2.2 ± 0.5 | 2.3 ± 0.7 | 2.5 ± 1.5 | 3.3 ± 1.4 | 4.4 ± 4.0 |
-| Air (aircraft) | 1.6 ± 0.7 | 2.1 ± 0.6 | 2.3 ± 0.7 | 2.7 ± 1.3 | 2.6 ± 2.0 | 3.7 ± 2.8 |
+| Land (stationary) | 1.9 ± 0.8 | 2.3 ± 0.7 | 3.0 ± 0.8 | 3.1 ± 1.1 | 4.7 ± 4.9 | 4.1 ± 1.9 |
+| Sea (vessel + swell) | 1.5 ± 0.7 | 2.0 ± 0.3 | 2.1 ± 0.5 | 2.4 ± 1.3 | 3.0 ± 1.4 | 4.2 ± 4.1 |
+| Air (aircraft) | 1.6 ± 0.7 | 1.9 ± 0.5 | 2.1 ± 0.4 | 2.5 ± 1.2 | 2.2 ± 1.9 | 3.8 ± 3.1 |
 
 ![cloud](results/fig_cloud.png)
 
@@ -197,7 +197,7 @@ Resulting position error (factor graph + IMU):
 | Regime | gated | ungated |
 |---|---|---|
 | Land (stationary) | 5.7 ± 2.4 | 7.7 ± 4.8 |
-| Sea (vessel + swell) | 26.2 ± 14.5 | 23.1 ± 12.5 |
+| Sea (vessel + swell) | 26.2 ± 14.5 | 23.1 ± 12.6 |
 | Air (aircraft) | 8.6 ± 3.1 | 16.4 ± 9.6 |
 
 ![gating](results/fig_gating.png)
@@ -230,17 +230,17 @@ Heading sigma (degrees) — magnetometer vs. optical disk:
 
 | Regime | magnetometer | optical (Moon limb) |
 |---|---|---|
-| Land (stationary) | 1.0° | 0.4° |
-| Sea (vessel + swell) | 1.0° | 0.4° |
-| Air (aircraft) | 1.0° | 0.4° |
+| Land (stationary) | 1.0° | 1.9° |
+| Sea (vessel + swell) | 1.0° | 1.9° |
+| Air (aircraft) | 1.0° | 1.9° |
 
 Position error (factor graph + IMU, gated, **IMU horizon** so the optical gain is visible):
 
 | Regime | altitude only | + az (magnetometer) | + az (optical) | **+ optical az & parallactic** |
 |---|---|---|---|---|
-| Land (stationary) | 5.4 ± 0.8 | 3.6 ± 1.9 | 3.5 ± 1.8 | **3.2 ± 1.3** |
-| Sea (vessel + swell) | 28.6 ± 15.8 | 17.4 ± 11.0 | 14.9 ± 6.4 | **12.4 ± 6.2** |
-| Air (aircraft) | 12.0 ± 6.0 | 8.4 ± 5.4 | 8.1 ± 5.5 | **5.2 ± 2.4** |
+| Land (stationary) | 5.4 ± 0.8 | 3.6 ± 1.9 | 3.6 ± 1.9 | **2.6 ± 0.9** |
+| Sea (vessel + swell) | 28.6 ± 15.8 | 17.3 ± 11.0 | 15.3 ± 11.4 | **11.4 ± 3.8** |
+| Air (aircraft) | 12.0 ± 6.0 | 8.4 ± 5.4 | 7.9 ± 5.2 | **4.8 ± 1.9** |
 
 The optical disk gives a heading several times better than the magnetometer, which is what makes the azimuth lines of position usable; combined with the parallactic line it materially improves the fix when the horizon is weak (e.g. sea on the IMU horizon). The Sun's P-angle needs a solar filter and visible spots (matched to an observatory reference taken just before the journey), so the Moon's bright limb is the workhorse.
 
@@ -251,9 +251,9 @@ The optical disk gives a heading several times better than the magnetometer, whi
 
 | Regime | ultrawide horizon only | **full stack (horizon + optical)** |
 |---|---|---|
-| Land (stationary) | 5.2 ± 2.2 | **4.1 ± 2.1** |
-| Sea (vessel + swell) | 2.7 ± 1.2 | **2.5 ± 1.1** |
-| Air (aircraft) | 2.8 ± 1.2 | **2.6 ± 1.0** |
+| Land (stationary) | 5.2 ± 2.2 | **4.5 ± 2.0** |
+| Sea (vessel + swell) | 2.7 ± 1.2 | **2.4 ± 1.1** |
+| Air (aircraft) | 2.8 ± 1.2 | **2.6 ± 1.2** |
 
 ## 5. Error vs. number of fused shots
 
