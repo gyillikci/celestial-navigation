@@ -105,6 +105,31 @@ So it is the reverse of *"wide lens for high hours"*: **the wide lens is the LOW
 
 Practical guidance: for this method prefer **moderate-to-low body altitudes (~15–30°)** — the wide lens then delivers the sharpest horizon and refraction is still manageable (below ~15° refraction/dip uncertainty grows; `starfix` models it). High-noon sights are the worst case for the optical horizon.
 
+## Sunspots as a visual anchor — increasing IMU precision
+
+A tracked disk feature (a sunspot through a solar filter, or a Moon crater/limb) is a star-tracker landmark: its direction is **translation-invariant** (so it behaves the same moving or stationary) and **acceleration-immune**. Tracking it pins the gyro bias and gives a drift-free attitude.
+
+Attitude/horizon error (arc-minutes):
+
+| | gyro only | accelerometer-aided | **anchor-aided** |
+|---|---|---|---|
+| Stationary, after 120 s | 50′ (drifting) | 12′ | **1.7′** |
+| Moving, after 30 s | 8′ | 526′ (motion-corrupted) | **2.1′** |
+
+![anchor drift](results/fig_anchor_drift.png)
+
+The gyro alone diverges (~0.17′/s); the accelerometer is bounded but wrecked by motion (~500′ while maneuvering); the anchor stays a few arc-minutes **whether moving or stationary**. That acceleration-immune attitude, plus the position estimate, gives a vertical/horizon that needs neither the accelerometer nor the sea horizon — so it **rescues the fix when the optical horizon is unavailable** (a high sight, a land skyline, or the horizon out of frame):
+
+| Regime | optical horizon: no anchor / anchor | no optical horizon: no anchor / anchor |
+|---|---|---|
+| Land (stationary) | 4.3 ± 1.5 / **2.1 ± 0.8** | 4.3 ± 1.5 / **2.1 ± 0.8** |
+| Sea (vessel + swell) | 2.1 ± 0.7 / **1.6 ± 0.6** | 16.2 ± 8.4 / **2.3 ± 0.9** |
+| Air (aircraft) | 2.3 ± 0.8 / **1.7 ± 0.6** | 8.3 ± 3.0 / **2.3 ± 0.8** |
+
+![anchor fix](results/fig_anchor_fix.png)
+
+So the anchor is transformative exactly where the accelerometer and the optical horizon fail, and a modest sharpener elsewhere. Cost: it needs a body **continuously tracked** in the tele field (the Sun through a filter, or the Moon's features), and the anchored vertical is only as good as the position estimate (~1–2′ at a ~2 km fix).
+
 ## 1. Factor graph vs. the incumbent single-fix
 
 | Regime | starfix single-fix (per-epoch RMS) | Factor graph, no IMU | **Factor graph + IMU** |

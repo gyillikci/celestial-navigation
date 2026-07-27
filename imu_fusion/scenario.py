@@ -34,6 +34,7 @@ from .ultrawide_horizon import (UltrawideHorizonSpec, DEFAULT_UW,
                                 horizon_reference_sigma_lens)
 from .optical_attitude import (parallactic_angle_deg, parallactic_sigma_deg,
                                optical_heading_sigma_deg, moon_limb_available)
+from .visual_anchor import anchor_horizon_sigma_arcmin
 from .capture_trigger import PROFILES, simulate_trace, find_shutter_instants
 
 # Canonical daytime epoch.  Greenwich (the home of longitude) near local noon,
@@ -135,7 +136,10 @@ def build_scenario(regime: str,
                    heading_source: str = "mag",
                    use_parallactic: bool = False,
                    sun_spots: bool = False,
-                   horizon_lens: str = None) -> Scenario:
+                   horizon_lens: str = None,
+                   imu_anchor: bool = False,
+                   anchor_track_s: float = 10.0,
+                   anchor_pos_km: float = 3.0) -> Scenario:
     ''' Generate a full scenario: trajectory, true geometry, noisy measurements
         and IMU stream.
 
@@ -190,6 +194,16 @@ def build_scenario(regime: str,
             else:
                 href = horizon_reference_sigma_lens(horizon_mode, kin, regime,
                                                     t_alt, horizon_lens, imu, uw)
+            # A tracked sunspot / disk-feature anchor is an extra, acceleration-
+            # immune, altitude-independent attitude reference: fuse it in
+            # (inverse-variance).  It rescues the cases where the optical horizon
+            # is unavailable (high sights, land, out of frame -> href ~ IMU) and
+            # modestly sharpens the rest.
+            if imu_anchor:
+                s_anchor = anchor_horizon_sigma_arcmin(anchor_pos_km,
+                                                       anchor_track_s, kin,
+                                                       imu, cam)
+                href = 1.0 / ((1.0 / href ** 2 + 1.0 / s_anchor ** 2) ** 0.5)
             a_sig = (cam.pointing_sigma_arcmin() ** 2 + href ** 2) ** 0.5
             meas_alt = t_alt + noise_scale * rng.gauss(0.0, a_sig / 60.0)
 

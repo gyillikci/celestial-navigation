@@ -181,6 +181,39 @@ FULL_SC = dict(horizon_mode="fused", use_azimuth=True, heading_source="optical",
 FULL_SV = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
 
 
+def exp_anchor_drift(times=(0.5, 1, 2, 5, 10, 30, 60, 120, 300)):
+    ''' Attitude error vs tracking time: gyro-only vs accelerometer-aided vs
+        visual-anchor-aided, stationary and moving. '''
+    from .visual_anchor import attitude_error_curve
+    return {"stationary": attitude_error_curve(times, moving=False),
+            "moving": attitude_error_curve(times, moving=True)}
+
+
+def exp_anchor_fix(n_shots=12):
+    ''' Fix RMS with/without the visual anchor, when the optical horizon is
+        available (fused) and when it is NOT (IMU horizon — a high sight, land,
+        or horizon out of frame). '''
+    out = {}
+    for r in REGIMES:
+        out[r] = {}
+        for cond, hmode in (("optical horizon", "fused"),
+                            ("no optical horizon", "imu")):
+            row = {}
+            for anchor in (False, True):
+                vals = [solve(build_scenario(r, random.Random(9700 + s),
+                                             n_shots=n_shots, horizon_mode=hmode,
+                                             use_azimuth=True,
+                                             heading_source="optical",
+                                             use_parallactic=True,
+                                             sun_spots=True, imu_anchor=anchor),
+                              use_imu=True, use_azimuth=True,
+                              use_parallactic=True)["rms_err_km"]
+                        for s in range(N_SEEDS)]
+                row["anchor" if anchor else "none"] = _mean_std(vals)
+            out[r][cond] = row
+    return out
+
+
 def exp_lens(alts=tuple(range(10, 71, 5)), n_shots=12):
     ''' Wide vs ultrawide horizon lens: reference sigma vs body altitude (the
         field-of-view constraint) plus the fix under each lens policy. '''
@@ -422,6 +455,58 @@ def plot_ablation(ab, path):
     ax.set_xticklabels(order, rotation=25, ha="right", fontsize=8.5)
     ax.set_ylabel("RMS position error (km)")
     ax.set_title("Leave-one-out: each observable's worth inside the unified graph")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_anchor_drift(ad, path):
+    ''' Attitude error vs tracking time — stationary and moving panels. '''
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.5), sharey=True)
+    for ax, key, title in ((axes[0], "stationary", "Stationary"),
+                           (axes[1], "moving", "Moving (maneuvering)")):
+        c = ad[key]
+        t = c["time"]
+        ax.plot(t, c["gyro_only"], marker="o", color="#d1495b",
+                label="gyro only (drifts)")
+        ax.plot(t, c["accel_aided"], marker="s", color="#edae49",
+                label="accelerometer-aided")
+        ax.plot(t, c["anchor_aided"], marker="^", color="#00798c",
+                label="visual-anchor-aided")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel("tracking time (s, log)")
+        ax.set_title(title)
+        ax.grid(alpha=0.3, which="both")
+    axes[0].set_ylabel("attitude / horizon error (arc min, log)")
+    axes[1].legend(fontsize=8, loc="upper left")
+    fig.suptitle("A tracked sunspot bounds gyro drift and is immune to motion",
+                 fontsize=12)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_anchor_fix(af, path):
+    ''' Fix RMS with/without the anchor, optical-horizon vs no-optical-horizon. '''
+    fig, ax = plt.subplots(figsize=(8.8, 4.6))
+    conds = ["optical horizon", "no optical horizon"]
+    x = np.arange(len(REGIMES) * len(conds))
+    labels, none_v, anch_v = [], [], []
+    for r in REGIMES:
+        for cond in conds:
+            labels.append(f"{REGIME_LABEL[r].split(' ')[0]}\n{cond}")
+            none_v.append(af[r][cond]["none"][0])
+            anch_v.append(af[r][cond]["anchor"][0])
+    w = 0.38
+    ax.bar(x - w / 2, none_v, w, color="#d1495b", label="no anchor")
+    ax.bar(x + w / 2, anch_v, w, color="#00798c", label="with sunspot anchor")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=7.5)
+    ax.set_ylabel("RMS position error (km)")
+    ax.set_title("The anchor rescues the fix when the optical horizon is lost")
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
@@ -916,6 +1001,58 @@ def write_results_md(data, path):
                  "~15° refraction/dip uncertainty grows; `starfix` models it). "
                  "High-noon sights are the worst case for the optical horizon.\n")
 
+    # ------- visual-anchor section -------
+    if "anchor_drift" in data:
+        ad = data["anchor_drift"]
+        af = data["anchor_fix"]
+
+        def _at(curve, key, t):
+            i = curve["time"].index(t)
+            return curve[key][i]
+        L.append("## Sunspots as a visual anchor — increasing IMU precision\n")
+        L.append("A tracked disk feature (a sunspot through a solar filter, or a "
+                 "Moon crater/limb) is a star-tracker landmark: its direction is "
+                 "**translation-invariant** (so it behaves the same moving or "
+                 "stationary) and **acceleration-immune**. Tracking it pins the "
+                 "gyro bias and gives a drift-free attitude.\n")
+        st_g = _at(ad["stationary"], "gyro_only", 120)
+        st_a = _at(ad["stationary"], "anchor_aided", 120)
+        mv_ac = _at(ad["moving"], "accel_aided", 30)
+        mv_an = _at(ad["moving"], "anchor_aided", 30)
+        L.append("Attitude/horizon error (arc-minutes):\n")
+        L.append("| | gyro only | accelerometer-aided | **anchor-aided** |")
+        L.append("|---|---|---|---|")
+        L.append(f"| Stationary, after 120 s | {st_g:.0f}′ (drifting) | "
+                 f"{_at(ad['stationary'],'accel_aided',120):.0f}′ | "
+                 f"**{st_a:.1f}′** |")
+        L.append(f"| Moving, after 30 s | {_at(ad['moving'],'gyro_only',30):.0f}′ | "
+                 f"{mv_ac:.0f}′ (motion-corrupted) | **{mv_an:.1f}′** |")
+        L.append("\n![anchor drift](results/fig_anchor_drift.png)\n")
+        L.append("The gyro alone diverges (~0.17′/s); the accelerometer is "
+                 "bounded but wrecked by motion (~500′ while maneuvering); the "
+                 "anchor stays a few arc-minutes **whether moving or "
+                 "stationary**. That acceleration-immune attitude, plus the "
+                 "position estimate, gives a vertical/horizon that needs neither "
+                 "the accelerometer nor the sea horizon — so it **rescues the "
+                 "fix when the optical horizon is unavailable** (a high sight, a "
+                 "land skyline, or the horizon out of frame):\n")
+        L.append("| Regime | optical horizon: no anchor / anchor | "
+                 "no optical horizon: no anchor / anchor |")
+        L.append("|---|---|---|")
+        for r in REGIMES:
+            oh = af[r]["optical horizon"]
+            nh = af[r]["no optical horizon"]
+            L.append(f"| {REGIME_LABEL[r]} | {cell(oh['none'])} / "
+                     f"**{cell(oh['anchor'])}** | {cell(nh['none'])} / "
+                     f"**{cell(nh['anchor'])}** |")
+        L.append("\n![anchor fix](results/fig_anchor_fix.png)\n")
+        L.append("So the anchor is transformative exactly where the accelerometer "
+                 "and the optical horizon fail, and a modest sharpener elsewhere. "
+                 "Cost: it needs a body **continuously tracked** in the tele "
+                 "field (the Sun through a filter, or the Moon's features), and "
+                 "the anchored vertical is only as good as the position estimate "
+                 "(~1–2′ at a ~2 km fix).\n")
+
     L.append("## 1. Factor graph vs. the incumbent single-fix\n")
     L.append("| Regime | starfix single-fix (per-epoch RMS) | "
              "Factor graph, no IMU | **Factor graph + IMU** |")
@@ -1232,6 +1369,21 @@ altitude: wide zone, ultrawide zone, then IMU-only.</figcaption></figure>
 </div>
 
 <div class='card'>
+<h2>Sunspots as a visual anchor — sharper IMU, moving or still</h2>
+<p>A tracked disk feature (a sunspot through a filter, or a Moon crater/limb) is
+a star-tracker landmark: translation-invariant and acceleration-immune. Tracking
+it pins the gyro bias, so attitude stays a few arc-minutes <b>whether moving or
+stationary</b> — while the gyro alone drifts (~0.17′/s) and the accelerometer is
+wrecked by motion (~500′ maneuvering). That acceleration-immune vertical rescues
+the fix when the optical horizon is unavailable (high sights, land, out of
+frame):</p>
+<figure><img src='results/fig_anchor_drift.png'><figcaption>Attitude error vs
+tracking time: the anchor curve is identical stationary and moving.</figcaption></figure>
+<figure><img src='results/fig_anchor_fix.png'><figcaption>With no optical horizon,
+the sunspot anchor cuts the fix error several-fold.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
@@ -1266,6 +1418,7 @@ def main():
                 optical=exp_optical(), heading_budget=exp_heading_budget(),
                 fullstack=exp_fullstack(), ablation=exp_ablation(),
                 realtime=exp_realtime(), zoom=exp_zoom(), lens=exp_lens(),
+                anchor_drift=exp_anchor_drift(), anchor_fix=exp_anchor_fix(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)
@@ -1280,6 +1433,9 @@ def main():
     plot_realtime(data["realtime"], os.path.join(OUT, "fig_realtime.png"))
     plot_zoom(data["zoom"], os.path.join(OUT, "fig_zoom.png"))
     plot_lens(data["lens"], os.path.join(OUT, "fig_lens.png"))
+    plot_anchor_drift(data["anchor_drift"],
+                      os.path.join(OUT, "fig_anchor_drift.png"))
+    plot_anchor_fix(data["anchor_fix"], os.path.join(OUT, "fig_anchor_fix.png"))
     plot_convergence(data["convergence"], os.path.join(OUT, "fig_convergence.png"))
     plot_trigger(os.path.join(OUT, "fig_trigger.png"))
     plot_ellipse(os.path.join(OUT, "fig_ellipse.png"))

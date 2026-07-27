@@ -280,6 +280,39 @@ class TestImuFusion(unittest.TestCase):
         self.assertGreater(wide, 2 * adap)      # wide-only loses the horizon
         self.assertAlmostEqual(adap, uw, delta=0.3)
 
+    def test_visual_anchor_bounds_drift_and_is_motion_immune(self):
+        ''' Gyro-only attitude diverges with time; the anchor stays bounded and
+            is nearly identical moving vs stationary (acceleration-immune). '''
+        from imu_fusion.visual_anchor import (gyro_only_attitude_arcmin,
+                                              anchor_attitude_arcmin)
+        from imu_fusion.iphone_model import KinematicState
+        self.assertGreater(gyro_only_attitude_arcmin(300),
+                           5 * gyro_only_attitude_arcmin(10))     # diverges
+        still = KinematicState(0.02, 0.03)
+        moving = KinematicState(0.30, 1.5)
+        a_still = anchor_attitude_arcmin(30, still)
+        a_move = anchor_attitude_arcmin(30, moving)
+        self.assertLess(a_still, 6.0)                             # bounded
+        self.assertAlmostEqual(a_still, a_move, delta=0.5)        # motion-immune
+
+    def test_visual_anchor_rescues_lost_horizon(self):
+        ''' With no optical horizon (IMU horizon) the anchor sharply improves the
+            fix; zero-noise still recovers truth. '''
+        full = dict(horizon_mode="imu", use_azimuth=True,
+                    heading_source="optical", use_parallactic=True,
+                    sun_spots=True)
+        sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+
+        def mean_rms(anchor):
+            return sum(solve(build_scenario("sea", random.Random(50 + s),
+                                            n_shots=12, imu_anchor=anchor,
+                                            **full), **sv)["rms_err_km"]
+                       for s in range(4)) / 4.0
+        self.assertLess(mean_rms(True), 0.5 * mean_rms(False))
+        zn = build_scenario("sea", random.Random(3), n_shots=8, noise_scale=0.0,
+                            imu_anchor=True, **full)
+        self.assertLess(solve(zn, pos_prior_km=100000.0, **sv)["rms_err_km"], 0.6)
+
     def test_starfix_baseline_runs(self):
         ''' The starfix single-fix baseline produces a finite error. '''
         sc = build_scenario("land", random.Random(4), n_shots=4)

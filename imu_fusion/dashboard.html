@@ -127,6 +127,21 @@ altitude: wide zone, ultrawide zone, then IMU-only.</figcaption></figure>
 </div>
 
 <div class='card'>
+<h2>Sunspots as a visual anchor — sharper IMU, moving or still</h2>
+<p>A tracked disk feature (a sunspot through a filter, or a Moon crater/limb) is
+a star-tracker landmark: translation-invariant and acceleration-immune. Tracking
+it pins the gyro bias, so attitude stays a few arc-minutes <b>whether moving or
+stationary</b> — while the gyro alone drifts (~0.17′/s) and the accelerometer is
+wrecked by motion (~500′ maneuvering). That acceleration-immune vertical rescues
+the fix when the optical horizon is unavailable (high sights, land, out of
+frame):</p>
+<figure><img src='results/fig_anchor_drift.png'><figcaption>Attitude error vs
+tracking time: the anchor curve is identical stationary and moving.</figcaption></figure>
+<figure><img src='results/fig_anchor_fix.png'><figcaption>With no optical horizon,
+the sunspot anchor cuts the fix error several-fold.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
