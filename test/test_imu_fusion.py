@@ -252,6 +252,34 @@ class TestImuFusion(unittest.TestCase):
         # pointing improves 3x but is negligible vs the horizon reference
         self.assertLess(cam3.pointing_sigma_arcmin() * 3, 0.2)
 
+    def test_horizon_lens_altitude_dependence(self):
+        ''' The wide lens frames the horizon only for low bodies; at the
+            canonical epoch (bodies ~32-40 deg) forcing it loses the horizon and
+            wrecks the fix, while adaptive matches ultrawide. '''
+        from imu_fusion.ultrawide_horizon import (lens_sees_horizon, WIDE_LENS,
+                                                  ULTRAWIDE_LENS,
+                                                  best_horizon_lens)
+        self.assertTrue(lens_sees_horizon(WIDE_LENS, 20))
+        self.assertFalse(lens_sees_horizon(WIDE_LENS, 40))
+        self.assertTrue(lens_sees_horizon(ULTRAWIDE_LENS, 40))
+        self.assertFalse(lens_sees_horizon(ULTRAWIDE_LENS, 60))
+        self.assertEqual(best_horizon_lens(20, "sea").name, "wide")
+        self.assertEqual(best_horizon_lens(40, "sea").name, "ultrawide")
+        self.assertIsNone(best_horizon_lens(60, "sea"))       # IMU only
+        full = dict(horizon_mode="fused", use_azimuth=True,
+                    heading_source="optical", use_parallactic=True,
+                    sun_spots=True)
+        sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+
+        def mean_rms(lens):
+            return sum(solve(build_scenario("sea", random.Random(40 + s),
+                                            n_shots=12, horizon_lens=lens,
+                                            **full), **sv)["rms_err_km"]
+                       for s in range(4)) / 4.0
+        wide, adap, uw = mean_rms("wide"), mean_rms("adaptive"), mean_rms("ultrawide")
+        self.assertGreater(wide, 2 * adap)      # wide-only loses the horizon
+        self.assertAlmostEqual(adap, uw, delta=0.3)
+
     def test_starfix_baseline_runs(self):
         ''' The starfix single-fix baseline produces a finite error. '''
         sc = build_scenario("land", random.Random(4), n_shots=4)

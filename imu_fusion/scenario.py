@@ -30,7 +30,8 @@ from .iphone_model import (IphoneImuSpec, TeleCameraSpec, KinematicState,
                            DEFAULT_IMU, DEFAULT_CAM, G0,
                            heading_sigma_arcmin)
 from .ultrawide_horizon import (UltrawideHorizonSpec, DEFAULT_UW,
-                                horizon_reference_sigma_arcmin)
+                                horizon_reference_sigma_arcmin,
+                                horizon_reference_sigma_lens)
 from .optical_attitude import (parallactic_angle_deg, parallactic_sigma_deg,
                                optical_heading_sigma_deg, moon_limb_available)
 from .capture_trigger import PROFILES, simulate_trace, find_shutter_instants
@@ -133,7 +134,8 @@ def build_scenario(regime: str,
                    uw: UltrawideHorizonSpec = DEFAULT_UW,
                    heading_source: str = "mag",
                    use_parallactic: bool = False,
-                   sun_spots: bool = False) -> Scenario:
+                   sun_spots: bool = False,
+                   horizon_lens: str = None) -> Scenario:
     ''' Generate a full scenario: trajectory, true geometry, noisy measurements
         and IMU stream.
 
@@ -176,12 +178,19 @@ def build_scenario(regime: str,
         # Horizon reference sigma for THIS shot: IMU gravity, optical ultrawide
         # horizon, or their fusion.  The tele-camera pointing error adds in
         # quadrature to give the altitude measurement sigma.
-        href = horizon_reference_sigma_arcmin(horizon_mode, kin, regime,
-                                              imu, uw)
-        a_sig = (cam.pointing_sigma_arcmin() ** 2 + href ** 2) ** 0.5
+        # Horizon reference sigma per shot; with a lens policy it depends on the
+        # body altitude (the horizon must stay in the horizon lens's field).
+        href_common = horizon_reference_sigma_arcmin(horizon_mode, kin, regime,
+                                                     imu, uw)
         for body in bodies:
             gp = body_gp(body, iso)
             t_alt, t_az = altaz(lat, lon, gp)
+            if horizon_lens is None:
+                href = href_common
+            else:
+                href = horizon_reference_sigma_lens(horizon_mode, kin, regime,
+                                                    t_alt, horizon_lens, imu, uw)
+            a_sig = (cam.pointing_sigma_arcmin() ** 2 + href ** 2) ** 0.5
             meas_alt = t_alt + noise_scale * rng.gauss(0.0, a_sig / 60.0)
 
             # Azimuth line of position: heading from magnetometer or from the

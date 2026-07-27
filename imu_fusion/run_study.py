@@ -181,6 +181,33 @@ FULL_SC = dict(horizon_mode="fused", use_azimuth=True, heading_source="optical",
 FULL_SV = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
 
 
+def exp_lens(alts=tuple(range(10, 71, 5)), n_shots=12):
+    ''' Wide vs ultrawide horizon lens: reference sigma vs body altitude (the
+        field-of-view constraint) plus the fix under each lens policy. '''
+    from .ultrawide_horizon import horizon_reference_sigma_lens
+    k = KinematicState(0.10, 0.20)                   # sea, gated
+    curve = {"alt": list(alts), "wide": [], "ultrawide": [], "adaptive": []}
+    for a in alts:
+        for pol in ("wide", "ultrawide", "adaptive"):
+            curve[pol].append(
+                horizon_reference_sigma_lens("uw", k, "sea", a, pol))
+    fix = {}
+    for r in ("sea", "air"):
+        fix[r] = {}
+        for pol in ("wide", "ultrawide", "adaptive"):
+            vals = [solve(build_scenario(r, random.Random(9600 + s),
+                                         n_shots=n_shots, horizon_mode="fused",
+                                         use_azimuth=True,
+                                         heading_source="optical",
+                                         use_parallactic=True, sun_spots=True,
+                                         horizon_lens=pol),
+                          use_imu=True, use_azimuth=True,
+                          use_parallactic=True)["rms_err_km"]
+                    for s in range(N_SEEDS)]
+            fix[r][pol] = _mean_std(vals)
+    return {"curve": curve, "fix": fix}
+
+
 def exp_zoom(zooms=(1, 2, 3), n_shots=12):
     ''' Does a clip-on teleconverter help?  Full-fusion RMS vs zoom, plus the
         error budget that explains the answer. '''
@@ -397,6 +424,42 @@ def plot_ablation(ab, path):
     ax.set_title("Leave-one-out: each observable's worth inside the unified graph")
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_lens(ld, path):
+    ''' Horizon reference sigma vs body altitude for the wide vs ultrawide lens,
+        with the field-of-view zones marked. '''
+    c = ld["curve"]
+    alts = c["alt"]
+    fig, ax = plt.subplots(figsize=(8.5, 4.8))
+    ax.plot(alts, c["wide"], marker="o", color="#00798c",
+            label="wide (main) lens — sharper, narrow field")
+    ax.plot(alts, c["ultrawide"], marker="s", color="#edae49",
+            label="ultrawide lens — wider field, softer")
+    ax.plot(alts, c["adaptive"], color="#3ddc97", lw=3, alpha=0.6,
+            label="best available (adaptive)")
+    ax.set_yscale("log")
+    ax.axvspan(0, 30, color="#00798c", alpha=0.07)
+    ax.axvspan(30, 52, color="#edae49", alpha=0.08)
+    ax.axvspan(52, 72, color="#d1495b", alpha=0.08)
+    ax.text(15, ax.get_ylim()[1] * 0.5, "wide\nzone", ha="center", fontsize=8,
+            color="#0a6")
+    ax.text(41, ax.get_ylim()[1] * 0.5, "ultrawide\nzone", ha="center",
+            fontsize=8, color="#a8791f")
+    ax.text(62, ax.get_ylim()[1] * 0.5, "IMU-only\n(no horizon)", ha="center",
+            fontsize=8, color="#a03040")
+    for alt, name in ((32, "Moon"), (40, "Sun")):
+        ax.axvline(alt, ls=":", color="#666", lw=1)
+        ax.text(alt, ax.get_ylim()[0] * 1.3, name, rotation=90, fontsize=7,
+                va="bottom", color="#666")
+    ax.set_xlabel("body altitude (degrees)")
+    ax.set_ylabel("horizon reference σ (arc minutes, log)")
+    ax.set_title("Which horizon lens? It depends on the body's altitude")
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=8, loc="lower right")
     fig.tight_layout()
     fig.savefig(path, dpi=130)
     plt.close(fig)
@@ -821,6 +884,38 @@ def write_results_md(data, path):
                  "the body), more motion/blur sensitivity, and added "
                  "weight/alignment/aberration.\n")
 
+    # ------- horizon lens section -------
+    if "lens" in data:
+        ld = data["lens"]
+        L.append("## Wide vs. ultrawide horizon lens — an altitude question\n")
+        L.append("All the phone's lenses point the same way, so to sight a body "
+                 "at altitude *h* the cluster aims at elevation *h* and the "
+                 "horizon sits *h* below the boresight. A lens captures the "
+                 "horizon only while *h* stays inside its field. The main "
+                 "**wide** lens gives a sharper horizon (less distortion) but its "
+                 "narrower field loses the horizon above ~30°; the **ultrawide** "
+                 "holds it to ~52°; above that neither sees it and the fix falls "
+                 "back to the IMU.\n")
+        L.append("![lens](results/fig_lens.png)\n")
+        L.append("So it is the reverse of *\"wide lens for high hours\"*: **the "
+                 "wide lens is the LOW-altitude choice** (a sharper horizon for "
+                 "bodies below ~30°), while **high sights need the ultrawide** — "
+                 "and very high sights (>52°) lose the optical horizon entirely. "
+                 "At the canonical epoch (Moon ~32°, Sun ~40°) both bodies are "
+                 "already in the ultrawide zone, so forcing the wide lens loses "
+                 "the horizon and wrecks the fix:\n")
+        L.append("| Regime | wide-only | ultrawide | adaptive |")
+        L.append("|---|---|---|---|")
+        for r in ("sea", "air"):
+            f = ld["fix"][r]
+            L.append(f"| {REGIME_LABEL[r]} | {cell(f['wide'])} | "
+                     f"{cell(f['ultrawide'])} | {cell(f['adaptive'])} |")
+        L.append("\nPractical guidance: for this method prefer **moderate-to-low "
+                 "body altitudes (~15–30°)** — the wide lens then delivers the "
+                 "sharpest horizon and refraction is still manageable (below "
+                 "~15° refraction/dip uncertainty grows; `starfix` models it). "
+                 "High-noon sights are the worst case for the optical horizon.\n")
+
     L.append("## 1. Factor graph vs. the incumbent single-fix\n")
     L.append("| Regime | starfix single-fix (per-epoch RMS) | "
              "Factor graph, no IMU | **Factor graph + IMU** |")
@@ -1124,6 +1219,19 @@ altitude budget.</figcaption></figure>
 </div>
 
 <div class='card'>
+<h2>Wide vs ultrawide horizon lens — an altitude question</h2>
+<p>All lenses point the same way, so sighting a body at altitude <i>h</i> puts
+the horizon <i>h</i> below the boresight — captured only while it stays in the
+horizon lens's field. The sharper <b>wide</b> lens frames the horizon only below
+~30°; the <b>ultrawide</b> holds it to ~52°; above that the fix falls back to the
+IMU. So it is the reverse of "wide lens for high hours": the wide lens is the
+<em>low</em>-altitude choice, high sights need the ultrawide, and very high
+sights lose the optical horizon. Prefer moderate/low sights (~15–30°).</p>
+<figure><img src='results/fig_lens.png'><figcaption>Horizon reference σ vs body
+altitude: wide zone, ultrawide zone, then IMU-only.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
@@ -1157,7 +1265,7 @@ def main():
                 horizon=exp_horizon(), horizon_budget=exp_horizon_budget(),
                 optical=exp_optical(), heading_budget=exp_heading_budget(),
                 fullstack=exp_fullstack(), ablation=exp_ablation(),
-                realtime=exp_realtime(), zoom=exp_zoom(),
+                realtime=exp_realtime(), zoom=exp_zoom(), lens=exp_lens(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)
@@ -1171,6 +1279,7 @@ def main():
     plot_ablation(data["ablation"], os.path.join(OUT, "fig_ablation.png"))
     plot_realtime(data["realtime"], os.path.join(OUT, "fig_realtime.png"))
     plot_zoom(data["zoom"], os.path.join(OUT, "fig_zoom.png"))
+    plot_lens(data["lens"], os.path.join(OUT, "fig_lens.png"))
     plot_convergence(data["convergence"], os.path.join(OUT, "fig_convergence.png"))
     plot_trigger(os.path.join(OUT, "fig_trigger.png"))
     plot_ellipse(os.path.join(OUT, "fig_ellipse.png"))

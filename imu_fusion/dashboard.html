@@ -114,6 +114,19 @@ altitude budget.</figcaption></figure>
 </div>
 
 <div class='card'>
+<h2>Wide vs ultrawide horizon lens — an altitude question</h2>
+<p>All lenses point the same way, so sighting a body at altitude <i>h</i> puts
+the horizon <i>h</i> below the boresight — captured only while it stays in the
+horizon lens's field. The sharper <b>wide</b> lens frames the horizon only below
+~30°; the <b>ultrawide</b> holds it to ~52°; above that the fix falls back to the
+IMU. So it is the reverse of "wide lens for high hours": the wide lens is the
+<em>low</em>-altitude choice, high sights need the ultrawide, and very high
+sights lose the optical horizon. Prefer moderate/low sights (~15–30°).</p>
+<figure><img src='results/fig_lens.png'><figcaption>Horizon reference σ vs body
+altitude: wide zone, ultrawide zone, then IMU-only.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;

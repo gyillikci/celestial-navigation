@@ -90,6 +90,21 @@ Why: the altitude error budget is dominated by the horizon (optical ~3.8′, IMU
 
 The lever that *would* help is a better **horizon/attitude** reference — a tripod/gimbal (kills the swell/tremor tilt), a longer ultrawide baseline, or a better AHRS — not more zoom. Downsides of a 3× optic: 3× narrower field (harder to acquire the body), more motion/blur sensitivity, and added weight/alignment/aberration.
 
+## Wide vs. ultrawide horizon lens — an altitude question
+
+All the phone's lenses point the same way, so to sight a body at altitude *h* the cluster aims at elevation *h* and the horizon sits *h* below the boresight. A lens captures the horizon only while *h* stays inside its field. The main **wide** lens gives a sharper horizon (less distortion) but its narrower field loses the horizon above ~30°; the **ultrawide** holds it to ~52°; above that neither sees it and the fix falls back to the IMU.
+
+![lens](results/fig_lens.png)
+
+So it is the reverse of *"wide lens for high hours"*: **the wide lens is the LOW-altitude choice** (a sharper horizon for bodies below ~30°), while **high sights need the ultrawide** — and very high sights (>52°) lose the optical horizon entirely. At the canonical epoch (Moon ~32°, Sun ~40°) both bodies are already in the ultrawide zone, so forcing the wide lens loses the horizon and wrecks the fix:
+
+| Regime | wide-only | ultrawide | adaptive |
+|---|---|---|---|
+| Sea (vessel + swell) | 14.7 ± 7.6 | 1.5 ± 1.0 | 1.5 ± 1.0 |
+| Air (aircraft) | 4.8 ± 2.9 | 1.7 ± 0.9 | 1.7 ± 0.9 |
+
+Practical guidance: for this method prefer **moderate-to-low body altitudes (~15–30°)** — the wide lens then delivers the sharpest horizon and refraction is still manageable (below ~15° refraction/dip uncertainty grows; `starfix` models it). High-noon sights are the worst case for the optical horizon.
+
 ## 1. Factor graph vs. the incumbent single-fix
 
 | Regime | starfix single-fix (per-epoch RMS) | Factor graph, no IMU | **Factor graph + IMU** |

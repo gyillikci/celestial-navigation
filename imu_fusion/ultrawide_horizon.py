@@ -84,6 +84,95 @@ class UltrawideHorizonSpec:
 DEFAULT_UW = UltrawideHorizonSpec()
 
 
+# --------------------------------------------------------------------------- #
+# Horizon-lens choice (wide main lens vs ultrawide).
+#
+# On a phone all lenses point the SAME way, so to sight a body at altitude h the
+# cluster is aimed at elevation h and the horizon sits h below the boresight.
+# A lens captures the horizon only if h (plus a margin to clear the distorted
+# edge) stays inside its half field of view.  The main WIDE lens has less
+# distortion and finer resolution than the ultrawide -> a SHARPER horizon -> a
+# lower tilt sigma -> a better fix -- but its narrower field loses the horizon at
+# a lower body altitude.  So the right lens depends on the body's altitude.
+# --------------------------------------------------------------------------- #
+
+@dataclass(frozen=True)
+class HorizonLensSpec:
+    ''' A lens used to image the horizon. '''
+    name: str
+    half_fov_deg: float          # half of the full field of view
+    distortion_arcmin: float     # residual distortion after calibration
+    fov_margin_deg: float = 5.0  # keep the horizon off the distorted extreme edge
+
+
+# Representative: the ultrawide sees the horizon up to a high body altitude but
+# is distorted; the main wide lens is sharper but frames the horizon only for
+# lower bodies.
+ULTRAWIDE_LENS = HorizonLensSpec("ultrawide", 57.0, 2.0)
+WIDE_LENS = HorizonLensSpec("wide", 35.0, 0.7)
+HORIZON_LENSES = (WIDE_LENS, ULTRAWIDE_LENS)     # sharpest first
+
+
+def lens_sees_horizon(lens: HorizonLensSpec, body_alt_deg: float) -> bool:
+    ''' True if the horizon is within this lens's field when sighting a body at
+        `body_alt_deg`. '''
+    return body_alt_deg + lens.fov_margin_deg <= lens.half_fov_deg
+
+
+def lens_horizon_sigma_arcmin(lens: HorizonLensSpec, state: KinematicState,
+                              regime: str, uw: UltrawideHorizonSpec = DEFAULT_UW):
+    ''' Optical horizon tilt sigma [arcmin] for a specific horizon lens. '''
+    dip_res = uw.dip_residual_arcmin.get(regime, 1.0)
+    surface = uw.surface_arcmin.get(regime, 1.5)
+    detect = uw.detect_sigma_arcmin()
+    rot = state.ang_rate * state.exposure_s * ARCMIN_PER_RAD
+    return sqrt(detect ** 2 + lens.distortion_arcmin ** 2 + dip_res ** 2 +
+                surface ** 2 + rot ** 2)
+
+
+def best_horizon_lens(body_alt_deg: float, regime: str):
+    ''' The sharpest horizon lens that still frames the horizon for this body
+        altitude, or None if no optical horizon is available (too high, or no
+        true horizon on land). '''
+    if not HORIZON_AVAILABLE.get(regime, False):
+        return None
+    for lens in HORIZON_LENSES:            # sharpest first
+        if lens_sees_horizon(lens, body_alt_deg):
+            return lens
+    return None
+
+
+def horizon_reference_sigma_lens(mode: str, state: KinematicState, regime: str,
+                                 body_alt_deg: float, lens_policy: str = "adaptive",
+                                 imu: IphoneImuSpec = DEFAULT_IMU,
+                                 uw: UltrawideHorizonSpec = DEFAULT_UW) -> float:
+    ''' Horizon (local-vertical) reference sigma [arcmin] with an explicit lens
+        policy and the body altitude that gates the field of view.
+
+        lens_policy: "ultrawide" | "wide" | "adaptive" (wide when it frames the
+        horizon, else ultrawide).  If the optical horizon is unavailable (body
+        too high for the chosen lens, or land), the IMU gravity horizon is used.
+    '''
+    s_imu = gravity_tilt_sigma_arcmin(state, imu)
+    if mode == "imu":
+        return s_imu
+
+    if lens_policy == "wide":
+        lens = WIDE_LENS if lens_sees_horizon(WIDE_LENS, body_alt_deg) else None
+    elif lens_policy == "ultrawide":
+        lens = (ULTRAWIDE_LENS if lens_sees_horizon(ULTRAWIDE_LENS, body_alt_deg)
+                else None)
+    else:                                  # adaptive
+        lens = best_horizon_lens(body_alt_deg, regime)
+    if lens is None or not HORIZON_AVAILABLE.get(regime, False):
+        return s_imu                       # fall back to gravity
+    s_opt = lens_horizon_sigma_arcmin(lens, state, regime, uw)
+    if mode == "uw":
+        return s_opt
+    # fused: inverse-variance combine gravity + optical
+    return 1.0 / sqrt(1.0 / s_imu ** 2 + 1.0 / s_opt ** 2)
+
+
 def dip_arcmin(regime: str, height_m: float = None,
                temperature: float = 10.0) -> float:
     ''' Nominal dip of the horizon for a regime (reuses starfix). '''
