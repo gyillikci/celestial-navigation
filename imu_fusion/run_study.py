@@ -122,6 +122,51 @@ def exp_horizon_budget():
     return out
 
 
+def exp_optical(n_shots=12, horizon_mode="imu"):
+    ''' Tele-disk orientation observables, on top of the (weak) IMU horizon so
+        their contribution is visible: altitude only, + azimuth via magnetometer
+        heading, + azimuth via OPTICAL heading, + optical azimuth AND the
+        parallactic-angle position line. '''
+    methods = {
+        "alt": (dict(), dict()),
+        "az_mag": (dict(use_azimuth=True, heading_source="mag"),
+                   dict(use_azimuth=True)),
+        "az_opt": (dict(use_azimuth=True, heading_source="optical"),
+                   dict(use_azimuth=True)),
+        "optical": (dict(use_azimuth=True, heading_source="optical",
+                         use_parallactic=True),
+                    dict(use_azimuth=True, use_parallactic=True)),
+    }
+    out = {}
+    for r in REGIMES:
+        row = {}
+        for name, (sc_kw, sv_kw) in methods.items():
+            vals = [solve(build_scenario(r, random.Random(6000 + s),
+                                         n_shots=n_shots,
+                                         horizon_mode=horizon_mode, **sc_kw),
+                          use_imu=True, **sv_kw)["rms_err_km"]
+                    for s in range(N_SEEDS)]
+            row[name] = _mean_std(vals)
+        out[r] = row
+    return out
+
+
+def exp_heading_budget():
+    ''' Heading sigma (deg): magnetometer vs optical disk orientation. '''
+    from .optical_attitude import optical_heading_sigma_deg
+    from .iphone_model import heading_sigma_arcmin
+    rep = {"land": KinematicState(0.02, 0.03),
+           "sea": KinematicState(0.10, 0.20),
+           "air": KinematicState(0.05, 0.30)}
+    out = {}
+    for r in REGIMES:
+        st_ = rep[r]
+        out[r] = dict(mag=heading_sigma_arcmin(st_, DEFAULT_IMU) / 60.0,
+                      moon=optical_heading_sigma_deg("Moon", st_),
+                      sun=optical_heading_sigma_deg("Sun", st_))
+    return out
+
+
 def exp_convergence(shot_counts=(4, 8, 12, 16, 20)):
     ''' RMS error vs number of shots, FG(IMU), gated. '''
     out = {r: {} for r in REGIMES}
@@ -230,6 +275,25 @@ def plot_horizon(hz, path):
                   ("fused (IMU + ultrawide)",
                    {r: hz[r]["fused"] for r in REGIMES}, "#3ddc97")],
                  "Optical horizon from the ultrawide camera rescues sea & air",
+                 "RMS position error (km)")
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_optical(opt, path):
+    fig, ax = plt.subplots(figsize=(8.5, 4.5))
+    _grouped_bar(ax, REGIMES,
+                 [("altitude only",
+                   {r: opt[r]["alt"] for r in REGIMES}, "#d1495b"),
+                  ("+ azimuth (magnetometer)",
+                   {r: opt[r]["az_mag"] for r in REGIMES}, "#edae49"),
+                  ("+ azimuth (optical heading)",
+                   {r: opt[r]["az_opt"] for r in REGIMES}, "#00798c"),
+                  ("+ optical azimuth & parallactic line",
+                   {r: opt[r]["optical"] for r in REGIMES}, "#3ddc97")],
+                 "Tele-disk orientation: magnetometer-free heading + "
+                 "parallactic line (IMU horizon)",
                  "RMS position error (km)")
     fig.tight_layout()
     fig.savefig(path, dpi=130)
@@ -349,7 +413,17 @@ def write_results_md(data, path):
              f"km** — bringing the moving platforms to land-class accuracy. "
              f"On land there is no true sea horizon, so it falls back to the "
              f"IMU (no change).\n")
-    L.append("5. **Geometry matters:** the fix is well-conditioned only when "
+    hdb = data["heading_budget"]
+    op = data["optical"]
+    L.append(f"5. **The tele lens is more than a pointer.** Resolving the disk "
+             f"— the Moon's bright limb, the Sun's sunspot P-angle — gives a "
+             f"magnetometer-free heading (~{hdb['sea']['moon']:.1f}° vs "
+             f"~{hdb['sea']['mag']:.0f}° for the phone compass) that makes the "
+             f"azimuth lines usable, plus a horizon-free parallactic position "
+             f"line. On a weak (IMU) horizon at sea the two together cut the fix "
+             f"from {op['sea']['alt'][0]:.0f} km to "
+             f"{op['sea']['optical'][0]:.0f} km.\n")
+    L.append("6. **Geometry matters:** the fix is well-conditioned only when "
              "the Sun and Moon are well separated in azimuth (~90° here, a "
              "first-quarter Moon); near-parallel lines of position degrade it.\n")
     L.append("## 1. Factor graph vs. the incumbent single-fix\n")
@@ -396,11 +470,43 @@ def write_results_md(data, path):
         L.append(f"| {REGIME_LABEL[r]} | {cell(hz[r]['imu'])} | "
                  f"{cell(hz[r]['uw'])} | **{cell(hz[r]['fused'])}** |")
     L.append("\n![horizon](results/fig_horizon.png)\n")
-    L.append("## 4. Error vs. number of fused shots\n")
+    L.append("## 4. Tele-resolved disk: magnetometer-free heading + "
+             "parallactic line\n")
+    L.append("The tele lens resolves the disk, not just a dot. The Moon's "
+             "bright limb (and the Sun's sunspot P-angle) give an *absolute* "
+             "celestial orientation in the image. Measured against the gravity "
+             "vertical, it yields the parallactic angle *q(lat, lon)* — a "
+             "heading reference that needs no magnetometer, and an independent, "
+             "horizon-free position line.\n")
+    hd = data["heading_budget"]
+    L.append("Heading sigma (degrees) — magnetometer vs. optical disk:\n")
+    L.append("| Regime | magnetometer | optical (Moon limb) |")
+    L.append("|---|---|---|")
+    for r in REGIMES:
+        L.append(f"| {REGIME_LABEL[r]} | {hd[r]['mag']:.1f}° | "
+                 f"{hd[r]['moon']:.1f}° |")
+    op = data["optical"]
+    L.append("\nPosition error (factor graph + IMU, gated, **IMU horizon** so "
+             "the optical gain is visible):\n")
+    L.append("| Regime | altitude only | + az (magnetometer) | "
+             "+ az (optical) | **+ optical az & parallactic** |")
+    L.append("|---|---|---|---|---|")
+    for r in REGIMES:
+        L.append(f"| {REGIME_LABEL[r]} | {cell(op[r]['alt'])} | "
+                 f"{cell(op[r]['az_mag'])} | {cell(op[r]['az_opt'])} | "
+                 f"**{cell(op[r]['optical'])}** |")
+    L.append("\nThe optical disk gives a heading several times better than the "
+             "magnetometer, which is what makes the azimuth lines of position "
+             "usable; combined with the parallactic line it materially improves "
+             "the fix when the horizon is weak (e.g. sea on the IMU horizon). "
+             "The Sun's P-angle needs a solar filter and visible spots, so the "
+             "Moon's bright limb is the workhorse.\n")
+    L.append("\n![optical](results/fig_optical.png)\n")
+    L.append("## 5. Error vs. number of fused shots\n")
     L.append("![convergence](results/fig_convergence.png)\n")
-    L.append("## 5. The trigger in action\n")
+    L.append("## 6. The trigger in action\n")
     L.append("![trigger](results/fig_trigger.png)\n")
-    L.append("## 6. Fix with covariance (error ellipse)\n")
+    L.append("## 7. Fix with covariance (error ellipse)\n")
     L.append("![ellipse](results/fig_ellipse.png)\n")
     L.append("## Model assumptions\n")
     L.append("- Representative phone-class MEMS IMU and periscope tele camera "
@@ -445,11 +551,22 @@ def write_dashboard(data, path):
                 f"<td>{cell(hz[r]['uw'])}</td>"
                 f"<td class='hi'>{cell(hz[r]['fused'])}</td></tr>")
 
+    op, hdb = data["optical"], data["heading_budget"]
+
+    def orow(r):
+        return (f"<tr><td>{REGIME_LABEL[r]}</td>"
+                f"<td>{hdb[r]['mag']:.1f}° / {hdb[r]['moon']:.1f}°</td>"
+                f"<td>{cell(op[r]['alt'])}</td>"
+                f"<td>{cell(op[r]['az_mag'])}</td>"
+                f"<td>{cell(op[r]['az_opt'])}</td>"
+                f"<td class='hi'>{cell(op[r]['optical'])}</td></tr>")
+
     imgs = "".join(
         f"<figure><img src='results/{fn}'><figcaption>{cap}</figcaption></figure>"
         for fn, cap in [
             ("fig_main.png", "Factor graph vs incumbent single-fix"),
             ("fig_horizon.png", "Ultrawide optical horizon rescues sea & air"),
+            ("fig_optical.png", "Tele-disk heading + parallactic line"),
             ("fig_gating.png", "Least-rotation shutter"),
             ("fig_convergence.png", "Error vs number of shots"),
             ("fig_trigger.png", "Trigger picking calm instants"),
@@ -502,6 +619,18 @@ back to the IMU.</p>
 </div>
 
 <div class='card'>
+<h2>The tele lens as an instrument, not a pointer</h2>
+<p>Resolving the disk — the Moon's bright limb, the Sun's sunspot P-angle —
+gives an absolute celestial orientation: a <em>magnetometer-free heading</em>
+(which makes the azimuth lines of position usable) and a horizon-free
+<em>parallactic</em> position line. Shown on the weak IMU horizon so the gain is
+visible; the Moon's limb is the workhorse (the Sun needs a filter and spots).</p>
+<table><tr><th>Regime</th><th>heading σ (mag / optical)</th><th>alt only</th>
+<th>+az (mag)</th><th>+az (optical)</th><th>+optical &amp; parallactic</th></tr>
+{orow('land')}{orow('sea')}{orow('air')}</table>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
@@ -533,6 +662,7 @@ def main():
     print("Running experiments (this takes a few minutes)…")
     data = dict(main=exp_main(), gating=exp_gating(),
                 horizon=exp_horizon(), horizon_budget=exp_horizon_budget(),
+                optical=exp_optical(), heading_budget=exp_heading_budget(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)
@@ -541,6 +671,7 @@ def main():
     plot_main(data["main"], os.path.join(OUT, "fig_main.png"))
     plot_gating(data["gating"], os.path.join(OUT, "fig_gating.png"))
     plot_horizon(data["horizon"], os.path.join(OUT, "fig_horizon.png"))
+    plot_optical(data["optical"], os.path.join(OUT, "fig_optical.png"))
     plot_convergence(data["convergence"], os.path.join(OUT, "fig_convergence.png"))
     plot_trigger(os.path.join(OUT, "fig_trigger.png"))
     plot_ellipse(os.path.join(OUT, "fig_ellipse.png"))

@@ -40,6 +40,7 @@ from gtsam.symbol_shorthand import X, V, B
 
 from .astro import predicted_altitude, predicted_azimuth, enu_to_latlon, \
     great_circle_km
+from .optical_attitude import parallactic_angle_deg
 from .iphone_model import G0
 
 _ARCMIN = 1.0 / 60.0
@@ -100,6 +101,26 @@ def celestial_azimuth_factor(key, gp, meas_az_deg, sigma_arcmin, lat0, lon0):
     return gtsam.CustomFactor(noise, [key], error)
 
 
+def parallactic_angle_factor(key, gp, meas_q_deg, sigma_deg, lat0, lon0):
+    ''' A unary parallactic-angle factor on a Pose3 (optical, horizon-free
+        position line from the tele-resolved disk orientation). '''
+    noise = gtsam.noiseModel.Isotropic.Sigma(1, sigma_deg)
+
+    def predict(pose):
+        t = pose.translation()
+        lat, lon = enu_to_latlon(t[0], t[1], lat0, lon0)
+        return parallactic_angle_deg(lat, lon, gp)
+
+    def error(this, values, H):
+        pose = values.atPose3(this.keys()[0])
+        resid = (predict(pose) - meas_q_deg + 180.0) % 360.0 - 180.0
+        if H is not None:
+            H[0] = _numeric_pose_jacobian(pose, predict, predict(pose))
+        return np.array([resid])
+
+    return gtsam.CustomFactor(noise, [key], error)
+
+
 # --------------------------------------------------------------------------- #
 # IMU preintegration
 # --------------------------------------------------------------------------- #
@@ -128,7 +149,7 @@ def _preintegrate(samples, params, bias):
 # --------------------------------------------------------------------------- #
 
 def build_graph(scenario, use_imu=True, use_azimuth=False,
-                pos_prior_km=1000.0):
+                use_parallactic=False, pos_prior_km=1000.0):
     ''' Build the factor graph and initial values for a scenario. '''
     graph = gtsam.NonlinearFactorGraph()
     initial = gtsam.Values()
@@ -160,6 +181,10 @@ def build_graph(scenario, use_imu=True, use_azimuth=False,
                 graph.add(celestial_azimuth_factor(
                     X(kf.index), o.gp, o.meas_az, o.az_sigma_arcmin,
                     lat0, lon0))
+            if use_parallactic and o.par_valid:
+                graph.add(parallactic_angle_factor(
+                    X(kf.index), o.gp, o.par_meas, o.par_sigma_deg,
+                    lat0, lon0))
 
     if use_imu:
         params = _imu_params(imu)
@@ -180,10 +205,12 @@ def build_graph(scenario, use_imu=True, use_azimuth=False,
     return graph, initial
 
 
-def solve(scenario, use_imu=True, use_azimuth=False, pos_prior_km=1000.0):
+def solve(scenario, use_imu=True, use_azimuth=False, use_parallactic=False,
+          pos_prior_km=1000.0):
     ''' Optimise and return a result dict with per-keyframe estimates,
         covariances and errors vs. ground truth. '''
-    graph, initial = build_graph(scenario, use_imu, use_azimuth, pos_prior_km)
+    graph, initial = build_graph(scenario, use_imu, use_azimuth,
+                                 use_parallactic, pos_prior_km)
     params = gtsam.LevenbergMarquardtParams()
     opt = gtsam.LevenbergMarquardtOptimizer(graph, initial, params)
     result = opt.optimize()

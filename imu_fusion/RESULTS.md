@@ -12,7 +12,9 @@
 
 4. **The ultrawide camera fixes the sea (and air) problem.** Shooting the ultrawide horizon at the same instant as the tele body gives an *optical* horizon that is immune to acceleration. It drops the sea fix from 27 km to **2.0 km** and the air fix from 9 km to **2.2 km** — bringing the moving platforms to land-class accuracy. On land there is no true sea horizon, so it falls back to the IMU (no change).
 
-5. **Geometry matters:** the fix is well-conditioned only when the Sun and Moon are well separated in azimuth (~90° here, a first-quarter Moon); near-parallel lines of position degrade it.
+5. **The tele lens is more than a pointer.** Resolving the disk — the Moon's bright limb, the Sun's sunspot P-angle — gives a magnetometer-free heading (~0.4° vs ~1° for the phone compass) that makes the azimuth lines usable, plus a horizon-free parallactic position line. On a weak (IMU) horizon at sea the two together cut the fix from 29 km to 12 km.
+
+6. **Geometry matters:** the fix is well-conditioned only when the Sun and Moon are well separated in azimuth (~90° here, a first-quarter Moon); near-parallel lines of position degrade it.
 
 ## 1. Factor graph vs. the incumbent single-fix
 
@@ -64,15 +66,40 @@ Resulting position error (factor graph + IMU, gated):
 
 ![horizon](results/fig_horizon.png)
 
-## 4. Error vs. number of fused shots
+## 4. Tele-resolved disk: magnetometer-free heading + parallactic line
+
+The tele lens resolves the disk, not just a dot. The Moon's bright limb (and the Sun's sunspot P-angle) give an *absolute* celestial orientation in the image. Measured against the gravity vertical, it yields the parallactic angle *q(lat, lon)* — a heading reference that needs no magnetometer, and an independent, horizon-free position line.
+
+Heading sigma (degrees) — magnetometer vs. optical disk:
+
+| Regime | magnetometer | optical (Moon limb) |
+|---|---|---|
+| Land (stationary) | 1.0° | 0.4° |
+| Sea (vessel + swell) | 1.0° | 0.4° |
+| Air (aircraft) | 1.0° | 0.4° |
+
+Position error (factor graph + IMU, gated, **IMU horizon** so the optical gain is visible):
+
+| Regime | altitude only | + az (magnetometer) | + az (optical) | **+ optical az & parallactic** |
+|---|---|---|---|---|
+| Land (stationary) | 5.4 ± 0.8 | 3.6 ± 1.9 | 3.5 ± 1.8 | **3.2 ± 1.3** |
+| Sea (vessel + swell) | 28.6 ± 15.8 | 17.4 ± 11.0 | 14.9 ± 6.4 | **12.4 ± 6.2** |
+| Air (aircraft) | 12.0 ± 6.0 | 8.4 ± 5.4 | 8.1 ± 5.5 | **5.2 ± 2.4** |
+
+The optical disk gives a heading several times better than the magnetometer, which is what makes the azimuth lines of position usable; combined with the parallactic line it materially improves the fix when the horizon is weak (e.g. sea on the IMU horizon). The Sun's P-angle needs a solar filter and visible spots, so the Moon's bright limb is the workhorse.
+
+
+![optical](results/fig_optical.png)
+
+## 5. Error vs. number of fused shots
 
 ![convergence](results/fig_convergence.png)
 
-## 5. The trigger in action
+## 6. The trigger in action
 
 ![trigger](results/fig_trigger.png)
 
-## 6. Fix with covariance (error ellipse)
+## 7. Fix with covariance (error ellipse)
 
 ![ellipse](results/fig_ellipse.png)
 

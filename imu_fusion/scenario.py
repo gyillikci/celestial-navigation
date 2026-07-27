@@ -31,6 +31,8 @@ from .iphone_model import (IphoneImuSpec, TeleCameraSpec, KinematicState,
                            heading_sigma_arcmin)
 from .ultrawide_horizon import (UltrawideHorizonSpec, DEFAULT_UW,
                                 horizon_reference_sigma_arcmin)
+from .optical_attitude import (parallactic_angle_deg, parallactic_sigma_deg,
+                               optical_heading_sigma_deg, moon_limb_available)
 from .capture_trigger import PROFILES, simulate_trace, find_shutter_instants
 
 # Canonical daytime epoch.  Greenwich (the home of longitude) near local noon,
@@ -55,6 +57,10 @@ class Observation:
     alt_sigma_arcmin: float
     az_sigma_arcmin: float
     kin: KinematicState
+    # Optical parallactic-angle observable from the tele-resolved disk.
+    par_meas: float = None        # measured parallactic angle q (deg)
+    par_sigma_deg: float = None
+    par_valid: bool = False
 
 
 @dataclass
@@ -124,7 +130,10 @@ def build_scenario(regime: str,
                    dr_error_km: float = 30.0,
                    dr_bearing_deg: float = 60.0,
                    horizon_mode: str = "imu",
-                   uw: UltrawideHorizonSpec = DEFAULT_UW) -> Scenario:
+                   uw: UltrawideHorizonSpec = DEFAULT_UW,
+                   heading_source: str = "mag",
+                   use_parallactic: bool = False,
+                   sun_spots: bool = False) -> Scenario:
     ''' Generate a full scenario: trajectory, true geometry, noisy measurements
         and IMU stream.
 
@@ -173,15 +182,35 @@ def build_scenario(regime: str,
         for body in bodies:
             gp = body_gp(body, iso)
             t_alt, t_az = altaz(lat, lon, gp)
-            h_sig = heading_sigma_arcmin(kin, imu)
             meas_alt = t_alt + noise_scale * rng.gauss(0.0, a_sig / 60.0)
+
+            # Azimuth line of position: heading from magnetometer or from the
+            # optical disk orientation (magnetometer-free).
+            if heading_source == "optical":
+                h_sig = optical_heading_sigma_deg(body, kin) * 60.0
+            else:
+                h_sig = heading_sigma_arcmin(kin, imu)
             meas_az = (t_az + noise_scale * rng.gauss(0.0, h_sig / 60.0)
                        if use_azimuth else t_az)
+
+            # Optical parallactic-angle observable from the resolved disk.
+            par_meas = par_sig = None
+            par_valid = False
+            if use_parallactic:
+                avail = (moon_limb_available(iso) if body.lower() == "moon"
+                         else sun_spots)
+                if avail:
+                    q_true = parallactic_angle_deg(lat, lon, gp)
+                    par_sig = parallactic_sigma_deg(body, kin, href, cam)
+                    par_meas = q_true + noise_scale * rng.gauss(0.0, par_sig)
+                    par_valid = True
+
             kf.observations.append(Observation(
                 body=body, time_iso=iso, gp=gp,
                 true_alt=t_alt, true_az=t_az,
                 meas_alt=meas_alt, meas_az=meas_az,
-                alt_sigma_arcmin=a_sig, az_sigma_arcmin=h_sig, kin=kin))
+                alt_sigma_arcmin=a_sig, az_sigma_arcmin=h_sig, kin=kin,
+                par_meas=par_meas, par_sigma_deg=par_sig, par_valid=par_valid))
         keyframes.append(kf)
 
     # IMU stream between consecutive keyframes.  With a constant, known level

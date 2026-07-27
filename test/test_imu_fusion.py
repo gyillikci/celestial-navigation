@@ -109,6 +109,52 @@ class TestImuFusion(unittest.TestCase):
         s_uw = horizon_reference_sigma_arcmin("uw", st, "land")
         self.assertAlmostEqual(s_imu, s_uw, places=6)
 
+    def test_optical_disk_geometry(self):
+        ''' Bright-limb PA, illuminated fraction and parallactic angle are
+            sane at the canonical epoch, and q depends on latitude. '''
+        from imu_fusion.optical_attitude import (moon_illuminated_fraction,
+                                                 bright_limb_pa_deg,
+                                                 parallactic_angle_deg,
+                                                 moon_limb_available)
+        from imu_fusion.astro import body_gp
+        t = "2026-03-24 12:00:00"
+        k = moon_illuminated_fraction(t)
+        self.assertTrue(0.4 < k < 0.9)                 # waxing gibbous
+        self.assertTrue(moon_limb_available(t))
+        self.assertTrue(0.0 <= bright_limb_pa_deg(t) < 360.0)
+        gm = body_gp("Moon", t)
+        q1 = parallactic_angle_deg(50.0, 0.0, gm)
+        q2 = parallactic_angle_deg(52.0, 0.0, gm)
+        self.assertGreater(abs(q1 - q2), 1.0)          # q tracks latitude
+
+    def test_optical_heading_beats_magnetometer(self):
+        ''' The optical disk heading is tighter than the phone magnetometer. '''
+        from imu_fusion.optical_attitude import optical_heading_sigma_deg
+        from imu_fusion.iphone_model import heading_sigma_arcmin
+        st = KinematicState(ang_rate=0.05, lin_accel=0.2)
+        opt = optical_heading_sigma_deg("Moon", st)
+        mag = heading_sigma_arcmin(st, DEFAULT_IMU) / 60.0
+        self.assertLess(opt, mag)
+
+    def test_optical_observables_help_sea(self):
+        ''' Optical azimuth + parallactic line improve the sea fix on the (weak)
+            IMU horizon, and zero-noise still recovers truth. '''
+        base = build_scenario("sea", random.Random(6), n_shots=12,
+                              horizon_mode="imu")
+        opt = build_scenario("sea", random.Random(6), n_shots=12,
+                             horizon_mode="imu", use_azimuth=True,
+                             heading_source="optical", use_parallactic=True)
+        e_base = solve(base, use_imu=True)["rms_err_km"]
+        e_opt = solve(opt, use_imu=True, use_azimuth=True,
+                      use_parallactic=True)["rms_err_km"]
+        self.assertLess(e_opt, e_base)
+        zn = build_scenario("sea", random.Random(6), n_shots=6, noise_scale=0.0,
+                            use_azimuth=True, heading_source="optical",
+                            use_parallactic=True)
+        r = solve(zn, use_imu=False, use_azimuth=True, use_parallactic=True,
+                  pos_prior_km=100000.0)
+        self.assertLess(r["rms_err_km"], 0.5)
+
     def test_starfix_baseline_runs(self):
         ''' The starfix single-fix baseline produces a finite error. '''
         sc = build_scenario("land", random.Random(4), n_shots=4)

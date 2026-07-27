@@ -36,6 +36,7 @@ instants (local minima of |ω|) to keep each IMU-photo pair clean.
 | `astro.py` | Body geographic position + predicted altitude/azimuth. Reuses `starfix`'s real Sun/Moon ephemeris. Local ENU ↔ lat/lon. |
 | `iphone_model.py` | Representative iPhone-class IMU + tele-camera noise; how motion corrupts the gravity horizon. |
 | `ultrawide_horizon.py` | Optical horizon from the ultrawide lens (fired with the tele): an acceleration-immune tilt reference, fused with the IMU. Reuses `starfix.get_dip_of_horizon`. |
+| `optical_attitude.py` | Orientation from the tele-resolved disk: Moon bright-limb PA, illuminated fraction, Sun P-angle, and the parallactic angle *q* → magnetometer-free heading + a horizon-free position line. |
 | `capture_trigger.py` | Per-regime hand/platform disturbance model and the least-rotation "smart shutter" (gated vs. periodic). |
 | `scenario.py` | Sea/land/air ground truth from the ephemeris + noisy Sun+Moon measurements + IMU stream. |
 | `celestial_factor_graph.py` | GTSAM graph: celestial altitude `CustomFactor` per sight, `ImuFactor` between shots, priors, LM solve, `Marginals` covariance. |
@@ -84,6 +85,13 @@ tables and figures.
   | Sea | ~27 km | ~2 km | **~2 km** |
   | Air | ~9 km | ~2 km | **~2 km** |
 
+- **The tele lens is an instrument, not a pointer.** Resolving the disk — the
+  Moon's bright limb, the Sun's sunspot P-angle — gives an absolute celestial
+  orientation: a **magnetometer-free heading** (~0.35° vs ~1° for the phone
+  compass) that makes the Sun/Moon **azimuth lines of position usable**, plus a
+  horizon-free **parallactic-angle** position line. On a weak (IMU) horizon this
+  cuts the sea fix ~28 → ~12 km and the air fix ~12 → ~5 km. The Moon's limb is
+  the workhorse; the Sun's P-angle needs a solar filter and visible spots.
 - Accuracy tracks **azimuth separation** of the two bodies (best near 90°).
 
 ## Modelling assumptions & honest limitations

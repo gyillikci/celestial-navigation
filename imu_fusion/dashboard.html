@@ -46,6 +46,18 @@ back to the IMU.</p>
 </div>
 
 <div class='card'>
+<h2>The tele lens as an instrument, not a pointer</h2>
+<p>Resolving the disk — the Moon's bright limb, the Sun's sunspot P-angle —
+gives an absolute celestial orientation: a <em>magnetometer-free heading</em>
+(which makes the azimuth lines of position usable) and a horizon-free
+<em>parallactic</em> position line. Shown on the weak IMU horizon so the gain is
+visible; the Moon's limb is the workhorse (the Sun needs a filter and spots).</p>
+<table><tr><th>Regime</th><th>heading σ (mag / optical)</th><th>alt only</th>
+<th>+az (mag)</th><th>+az (optical)</th><th>+optical &amp; parallactic</th></tr>
+<tr><td>Land (stationary)</td><td>1.0° / 0.4°</td><td>5.4 ± 0.8</td><td>3.6 ± 1.9</td><td>3.5 ± 1.8</td><td class='hi'>3.2 ± 1.3</td></tr><tr><td>Sea (vessel + swell)</td><td>1.0° / 0.4°</td><td>28.6 ± 15.8</td><td>17.4 ± 11.0</td><td>14.9 ± 6.4</td><td class='hi'>12.4 ± 6.2</td></tr><tr><td>Air (aircraft)</td><td>1.0° / 0.4°</td><td>12.0 ± 6.0</td><td>8.4 ± 5.4</td><td>8.1 ± 5.5</td><td class='hi'>5.2 ± 2.4</td></tr></table>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
@@ -56,7 +68,7 @@ dominates and a gimbal/mount is needed.</p>
 <tr><td>Land (stationary)</td><td>6.4′</td><td>18.1′</td><td>5.7 ± 2.4</td><td>7.7 ± 4.8</td></tr><tr><td>Sea (vessel + swell)</td><td>95.9′</td><td>402.6′</td><td>26.2 ± 14.5</td><td>23.1 ± 12.5</td></tr><tr><td>Air (aircraft)</td><td>22.2′</td><td>138.3′</td><td>8.6 ± 3.1</td><td>16.4 ± 9.6</td></tr></table>
 </div>
 
-<div class='card'><h2>Figures</h2><figure><img src='results/fig_main.png'><figcaption>Factor graph vs incumbent single-fix</figcaption></figure><figure><img src='results/fig_horizon.png'><figcaption>Ultrawide optical horizon rescues sea & air</figcaption></figure><figure><img src='results/fig_gating.png'><figcaption>Least-rotation shutter</figcaption></figure><figure><img src='results/fig_convergence.png'><figcaption>Error vs number of shots</figcaption></figure><figure><img src='results/fig_trigger.png'><figcaption>Trigger picking calm instants</figcaption></figure><figure><img src='results/fig_ellipse.png'><figcaption>Fix with covariance ellipse</figcaption></figure></div>
+<div class='card'><h2>Figures</h2><figure><img src='results/fig_main.png'><figcaption>Factor graph vs incumbent single-fix</figcaption></figure><figure><img src='results/fig_horizon.png'><figcaption>Ultrawide optical horizon rescues sea & air</figcaption></figure><figure><img src='results/fig_optical.png'><figcaption>Tele-disk heading + parallactic line</figcaption></figure><figure><img src='results/fig_gating.png'><figcaption>Least-rotation shutter</figcaption></figure><figure><img src='results/fig_convergence.png'><figcaption>Error vs number of shots</figcaption></figure><figure><img src='results/fig_trigger.png'><figcaption>Trigger picking calm instants</figcaption></figure><figure><img src='results/fig_ellipse.png'><figcaption>Fix with covariance ellipse</figcaption></figure></div>
 
 <div class='card'><h2>How it works</h2>
 <p>The phone is a digital theodolite: its IMU gives the local vertical (a
