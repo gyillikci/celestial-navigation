@@ -181,6 +181,40 @@ FULL_SC = dict(horizon_mode="fused", use_azimuth=True, heading_source="optical",
 FULL_SV = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
 
 
+def exp_zoom(zooms=(1, 2, 3), n_shots=12):
+    ''' Does a clip-on teleconverter help?  Full-fusion RMS vs zoom, plus the
+        error budget that explains the answer. '''
+    from dataclasses import replace as _replace
+    from .ultrawide_horizon import horizon_reference_sigma_arcmin
+    out = {"rms": {}, "budget": {}}
+    for r in REGIMES:
+        out["rms"][r] = {}
+        for z in zooms:
+            cam = _replace(DEFAULT_CAM, teleconverter=z)
+            vals = [solve(build_scenario(r, random.Random(9500 + s),
+                                         n_shots=n_shots, horizon_mode="fused",
+                                         use_azimuth=True,
+                                         heading_source="optical",
+                                         use_parallactic=True, sun_spots=True,
+                                         cam=cam),
+                          use_imu=True, use_azimuth=True,
+                          use_parallactic=True)["rms_err_km"]
+                    for s in range(N_SEEDS)]
+            out["rms"][r][z] = _mean_std(vals)
+    # Altitude error budget at a representative gated sea instant (arc minutes).
+    sea_kin = KinematicState(0.10, 0.20)
+    out["budget"] = {
+        "camera pointing 1x": DEFAULT_CAM.pointing_sigma_arcmin(),
+        "camera pointing 3x":
+            _replace(DEFAULT_CAM, teleconverter=3).pointing_sigma_arcmin(),
+        "optical horizon (sea)":
+            horizon_reference_sigma_arcmin("uw", sea_kin, "sea"),
+        "IMU horizon (sea)":
+            horizon_reference_sigma_arcmin("imu", sea_kin, "sea"),
+    }
+    return out
+
+
 def exp_realtime():
     ''' Batch-vs-streaming latency and accuracy parity (see bench.py). '''
     from . import bench
@@ -363,6 +397,48 @@ def plot_ablation(ab, path):
     ax.set_title("Leave-one-out: each observable's worth inside the unified graph")
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_zoom(zd, path):
+    ''' Left: full-fusion RMS vs teleconverter (flat). Right: altitude error
+        budget (log) — the camera is already ~100x below the horizon, so more
+        zoom is optically wasted. '''
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 4.4))
+    zooms = sorted(next(iter(zd["rms"].values())).keys(),
+                   key=lambda z: int(z) if isinstance(z, str) else z)
+    zi = [int(z) if isinstance(z, str) else z for z in zooms]
+    cols = {"land": "#edae49", "sea": "#00798c", "air": "#3ddc97"}
+    for r in REGIMES:
+        means = [zd["rms"][r][z][0] for z in zooms]
+        errs = [zd["rms"][r][z][1] for z in zooms]
+        a1.errorbar(zi, means, yerr=errs, marker="o", capsize=3,
+                    color=cols[r], label=REGIME_LABEL[r])
+    a1.set_xticks(zi)
+    a1.set_xticklabels([f"{z}×" for z in zi])
+    a1.set_xlabel("external teleconverter")
+    a1.set_ylabel("RMS position error (km)")
+    a1.set_ylim(bottom=0)
+    a1.set_title("More zoom does not move the fix")
+    a1.grid(alpha=0.3)
+    a1.legend(fontsize=8)
+
+    b = zd["budget"]
+    labels = ["camera\npointing 3×", "camera\npointing 1×",
+              "optical horizon\n(sea)", "IMU horizon\n(sea)"]
+    keys = ["camera pointing 3x", "camera pointing 1x",
+            "optical horizon (sea)", "IMU horizon (sea)"]
+    vals = [b[k] for k in keys]
+    barcols = ["#9bbfc7", "#00798c", "#3ddc97", "#d1495b"]
+    a2.barh(labels, vals, color=barcols)
+    a2.set_xscale("log")
+    a2.set_xlabel("altitude error contribution (arc minutes, log)")
+    a2.set_title("The camera is ~100× below the horizon")
+    for i, v in enumerate(vals):
+        a2.text(v * 1.1, i, f"{v:.2f}′", va="center", fontsize=8)
+    a2.grid(axis="x", alpha=0.3, which="both")
     fig.tight_layout()
     fig.savefig(path, dpi=130)
     plt.close(fig)
@@ -714,6 +790,37 @@ def write_results_md(data, path):
                  "Jacobians and the reduced two-DOF finite difference — only "
                  "east/north affect a celestial factor — remove the rest.)\n")
 
+    # ------- teleconverter section -------
+    if "zoom" in data:
+        zd = data["zoom"]
+        zooms = sorted(next(iter(zd["rms"].values())).keys(),
+                       key=lambda z: int(z))
+        L.append("## Would an external 3× teleconverter help? No.\n")
+        L.append("A clip-on afocal optic triples the tele focal length "
+                 "(sharper pointing, bigger disk), but the fix is **unchanged** "
+                 "— the system is limited by the horizon/attitude reference, not "
+                 "the camera. Full-fusion RMS (km) vs teleconverter:\n")
+        L.append("| Regime | " + " | ".join(f"{z}×" for z in zooms) + " |")
+        L.append("|" + "---|" * (len(zooms) + 1))
+        for r in REGIMES:
+            L.append(f"| {REGIME_LABEL[r]} | " +
+                     " | ".join(cell(zd["rms"][r][z]) for z in zooms) + " |")
+        bud = zd["budget"]
+        L.append(f"\nWhy: the altitude error budget is dominated by the horizon "
+                 f"(optical ~{bud['optical horizon (sea)']:.1f}′, IMU "
+                 f"~{bud['IMU horizon (sea)']:.0f}′ at sea), while camera pointing "
+                 f"is ~{bud['camera pointing 1x']:.2f}′ — already ~100× smaller, and "
+                 f"3× zoom only shrinks that already-negligible term. Heading is "
+                 f"floored by astronomical/model residuals (libration, seeing, "
+                 f"P-angle) that zoom cannot improve.\n")
+        L.append("![zoom](results/fig_zoom.png)\n")
+        L.append("The lever that *would* help is a better **horizon/attitude** "
+                 "reference — a tripod/gimbal (kills the swell/tremor tilt), a "
+                 "longer ultrawide baseline, or a better AHRS — not more zoom. "
+                 "Downsides of a 3× optic: 3× narrower field (harder to acquire "
+                 "the body), more motion/blur sensitivity, and added "
+                 "weight/alignment/aberration.\n")
+
     L.append("## 1. Factor graph vs. the incumbent single-fix\n")
     L.append("| Regime | starfix single-fix (per-epoch RMS) | "
              "Factor graph, no IMU | **Factor graph + IMU** |")
@@ -1004,6 +1111,19 @@ disk, Moon&nbsp;+&nbsp;Sun) gives the deployed accuracy:</p>
 </div>
 
 <div class='card'>
+<h2>Would a 3× external teleconverter help? No.</h2>
+<p>A clip-on optic triples the tele focal length, but the fix is unchanged — the
+system is limited by the horizon/attitude reference, not the camera (already
+~100× sharper). More zoom only shrinks an already-negligible term; heading is
+floored by astronomical residuals (libration, seeing, P-angle) that zoom can't
+fix. The lever that helps is a better horizon — a gimbal, longer ultrawide
+baseline, or better AHRS.</p>
+<figure><img src='results/fig_zoom.png'><figcaption>Left: full-fusion error is
+flat across 1×/2×/3×. Right: the camera sits ~100× below the horizon in the
+altitude budget.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
@@ -1037,7 +1157,7 @@ def main():
                 horizon=exp_horizon(), horizon_budget=exp_horizon_budget(),
                 optical=exp_optical(), heading_budget=exp_heading_budget(),
                 fullstack=exp_fullstack(), ablation=exp_ablation(),
-                realtime=exp_realtime(),
+                realtime=exp_realtime(), zoom=exp_zoom(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)
@@ -1050,6 +1170,7 @@ def main():
     plot_factorgraph(os.path.join(OUT, "fig_factorgraph.png"))
     plot_ablation(data["ablation"], os.path.join(OUT, "fig_ablation.png"))
     plot_realtime(data["realtime"], os.path.join(OUT, "fig_realtime.png"))
+    plot_zoom(data["zoom"], os.path.join(OUT, "fig_zoom.png"))
     plot_convergence(data["convergence"], os.path.join(OUT, "fig_convergence.png"))
     plot_trigger(os.path.join(OUT, "fig_trigger.png"))
     plot_ellipse(os.path.join(OUT, "fig_ellipse.png"))

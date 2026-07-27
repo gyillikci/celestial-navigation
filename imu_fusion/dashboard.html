@@ -101,6 +101,19 @@ disk, Moon&nbsp;+&nbsp;Sun) gives the deployed accuracy:</p>
 </div>
 
 <div class='card'>
+<h2>Would a 3× external teleconverter help? No.</h2>
+<p>A clip-on optic triples the tele focal length, but the fix is unchanged — the
+system is limited by the horizon/attitude reference, not the camera (already
+~100× sharper). More zoom only shrinks an already-negligible term; heading is
+floored by astronomical residuals (libration, seeing, P-angle) that zoom can't
+fix. The lever that helps is a better horizon — a gimbal, longer ultrawide
+baseline, or better AHRS.</p>
+<figure><img src='results/fig_zoom.png'><figcaption>Left: full-fusion error is
+flat across 1×/2×/3×. Right: the camera sits ~100× below the horizon in the
+altitude budget.</figcaption></figure>
+</div>
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;

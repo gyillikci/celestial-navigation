@@ -128,7 +128,7 @@ def orientation_sigma_deg(body: str, state: KinematicState,
         during the exposure smears the axis.
     '''
     r_deg = MOON_RADIUS_DEG if body.lower() == "moon" else SUN_RADIUS_DEG
-    r_px = r_deg * 3600.0 / cam.arcsec_per_px
+    r_px = r_deg * 3600.0 / cam.eff_arcsec_per_px()
     # Axis-fit sigma ~ edge sigma / lever arm, over ~ (rim points) samples.
     n = max(1.0, r_px)                        # ~1 sample per pixel of rim length
     fit_deg = degrees(disk.edge_px_sigma / r_px) / sqrt(n)

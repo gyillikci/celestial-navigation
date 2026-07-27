@@ -74,6 +74,22 @@ Per-fix latency at 30 shots (host CPU, single thread; an A19 Pro is comparable):
 
 The streaming current-position estimate matches batch to ~0.02 km — same accuracy, bounded cost. (The dominant saving is doing IMU preintegration once online instead of re-preintegrating every leg on each batch solve; analytic Jacobians and the reduced two-DOF finite difference — only east/north affect a celestial factor — remove the rest.)
 
+## Would an external 3× teleconverter help? No.
+
+A clip-on afocal optic triples the tele focal length (sharper pointing, bigger disk), but the fix is **unchanged** — the system is limited by the horizon/attitude reference, not the camera. Full-fusion RMS (km) vs teleconverter:
+
+| Regime | 1× | 2× | 3× |
+|---|---|---|---|
+| Land (stationary) | 3.1 ± 1.7 | 3.1 ± 1.7 | 3.1 ± 1.7 |
+| Sea (vessel + swell) | 1.5 ± 0.8 | 1.5 ± 0.8 | 1.5 ± 0.8 |
+| Air (aircraft) | 1.6 ± 0.9 | 1.6 ± 0.9 | 1.6 ± 0.9 |
+
+Why: the altitude error budget is dominated by the horizon (optical ~3.8′, IMU ~70′ at sea), while camera pointing is ~0.03′ — already ~100× smaller, and 3× zoom only shrinks that already-negligible term. Heading is floored by astronomical/model residuals (libration, seeing, P-angle) that zoom cannot improve.
+
+![zoom](results/fig_zoom.png)
+
+The lever that *would* help is a better **horizon/attitude** reference — a tripod/gimbal (kills the swell/tremor tilt), a longer ultrawide baseline, or a better AHRS — not more zoom. Downsides of a 3× optic: 3× narrower field (harder to acquire the body), more motion/blur sensitivity, and added weight/alignment/aberration.
+
 ## 1. Factor graph vs. the incumbent single-fix
 
 | Regime | starfix single-fix (per-epoch RMS) | Factor graph, no IMU | **Factor graph + IMU** |

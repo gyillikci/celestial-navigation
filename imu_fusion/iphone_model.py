@@ -80,12 +80,18 @@ class TeleCameraSpec:
     '''
     width_px: int = 8064
     height_px: int = 6048
-    arcsec_per_px: float = 9.0               # ~ tele plate scale
+    arcsec_per_px: float = 9.0               # ~ tele plate scale (bare lens)
     centroid_px_sigma: float = 0.2           # sub-pixel disk-centre precision
+    teleconverter: float = 1.0               # external afocal optic (e.g. 3x)
+
+    def eff_arcsec_per_px(self) -> float:
+        ''' Effective plate scale with any clip-on teleconverter: a 3x optic
+            triples the focal length, so each pixel spans 1/3 the sky. '''
+        return self.arcsec_per_px / self.teleconverter
 
     def pointing_sigma_arcmin(self) -> float:
         ''' Camera-only pointing sigma from disk centroiding [arc minutes]. '''
-        return self.centroid_px_sigma * self.arcsec_per_px / 60.0
+        return self.centroid_px_sigma * self.eff_arcsec_per_px() / 60.0
 
 
 @dataclass(frozen=True)

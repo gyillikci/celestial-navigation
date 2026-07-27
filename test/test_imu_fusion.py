@@ -234,6 +234,24 @@ class TestImuFusion(unittest.TestCase):
                          (g2.get_lat(), g2.get_lon()))
         self.assertGreaterEqual(len(astro._GP_CACHE), 1)
 
+    def test_teleconverter_does_not_move_fix(self):
+        ''' A 3x external optic sharpens pointing but the horizon-limited fix is
+            unchanged; the camera contribution stays far below the horizon. '''
+        from dataclasses import replace
+        from imu_fusion.iphone_model import DEFAULT_CAM
+        full = dict(horizon_mode="fused", use_azimuth=True,
+                    heading_source="optical", use_parallactic=True,
+                    sun_spots=True)
+        sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+        e1 = solve(build_scenario("sea", random.Random(31), n_shots=12,
+                                  cam=DEFAULT_CAM, **full), **sv)["rms_err_km"]
+        cam3 = replace(DEFAULT_CAM, teleconverter=3.0)
+        e3 = solve(build_scenario("sea", random.Random(31), n_shots=12,
+                                  cam=cam3, **full), **sv)["rms_err_km"]
+        self.assertAlmostEqual(e1, e3, delta=0.2)          # fix unchanged
+        # pointing improves 3x but is negligible vs the horizon reference
+        self.assertLess(cam3.pointing_sigma_arcmin() * 3, 0.2)
+
     def test_starfix_baseline_runs(self):
         ''' The starfix single-fix baseline produces a finite error. '''
         sc = build_scenario("land", random.Random(4), n_shots=4)
