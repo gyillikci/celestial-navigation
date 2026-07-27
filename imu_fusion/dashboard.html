@@ -156,6 +156,28 @@ bodies are lost: sub-km for ~2 minutes, then dead-reckoning runs away.</figcapti
 </div>
 
 <div class='card'>
+<h2>Are the Sun/Moon positions right? Independent ground-truth check</h2>
+<p>Every fix rests on the Sun/Moon positions from <code>starfix</code>'s almanac.
+Those are cross-checked here against an <b>independent</b> ephemeris
+(<code>astropy</code> — a separate implementation from the almanac's
+Skyfield/JPL source) over a 90-day grid. Both bodies agree to a
+<b>few arc-seconds</b>, far below the study's arc-minute measurement noise.</p>
+<table><tr><th>Body</th><th>GHA rms / max</th><th>Dec rms / max</th><th>≈ position</th></tr>
+<tr><td>Sun</td><td class='mono'>1.9″ / 3.8″</td><td class='mono'>1.7″ / 3.0″</td><td class='mono dim'>~0.07 km</td></tr><tr><td>Moon</td><td class='mono'>4.0″ / 11.0″</td><td class='mono'>2.4″ / 6.7″</td><td class='mono dim'>~0.20 km</td></tr></table>
+<figure><img src='results/fig_groundtruth.png'><figcaption>GHA/Dec residual vs an
+independent ephemeris across 90 days — a few arc-seconds, set by the almanac's
+0.1′ quantization and hourly interpolation.</figcaption></figure>
+<p class='note'><b>This check earned its keep:</b> it first flagged a Moon-declination
+error up to ~1.6° near the Dec≈0 crossings — a sign bug in
+<code>starfix.parse_angle_string</code> for the <code>-00:MM.M</code> format
+(<code>float("-00")</code> is <code>-0.0</code>, and <code>-0.0&nbsp;&lt;&nbsp;0</code>
+is false). Now fixed; the canonical epoch (Moon at Dec&nbsp;+28°) was never affected.
+A <b>Stellarium</b> export can be dropped in as a third witness — see
+<code>stellarium_reference.md</code>.</p>
+</div>
+
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;

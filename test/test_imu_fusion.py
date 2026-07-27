@@ -351,6 +351,32 @@ class TestImuFusion(unittest.TestCase):
         self.assertIsNotNone(err)
         self.assertGreaterEqual(err, 0.0)
 
+    def test_parse_angle_negative_zero_degree(self):
+        ''' A leading "-" on a zero-degree field must make the whole angle
+            negative (regression for the Moon-Dec sign bug found by the
+            independent ground-truth check: "-00:47.6" is -0.793°, not +0.793°). '''
+        from starfix import parse_angle_string
+        self.assertAlmostEqual(parse_angle_string("-00:47.6"), -47.6 / 60.0, places=4)
+        self.assertAlmostEqual(parse_angle_string("-00:30:00"), -0.5, places=6)
+        # Sign of a nonzero degree field is unchanged.
+        self.assertAlmostEqual(parse_angle_string("-1:30"), -1.5, places=6)
+        self.assertAlmostEqual(parse_angle_string("12:30"), 12.5, places=6)
+
+    def test_groundtruth_matches_independent_ephemeris(self):
+        ''' If an independent engine is installed, the almanac's Sun/Moon GHA and
+            Dec must agree with it to well under an arc-minute over a time grid.
+            Skipped when no engine (astropy/skyfield) is available. '''
+        from imu_fusion import validate_ephemeris as V
+        if V.ENGINE is None:
+            self.skipTest("no independent ephemeris engine installed")
+        res = V.compare(V.default_grid(n_days=20, step_hours=12),
+                        locations=((51.5, 0.0),))
+        for body in ("Sun", "Moon"):
+            gha_max = max(abs(x) for x in res[body]["gha_as"])
+            dec_max = max(abs(x) for x in res[body]["dec_as"])
+            self.assertLess(gha_max, 60.0, f"{body} GHA residual {gha_max:.1f}\"")
+            self.assertLess(dec_max, 60.0, f"{body} Dec residual {dec_max:.1f}\"")
+
 
 if __name__ == "__main__":
     unittest.main()

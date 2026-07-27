@@ -4,3 +4,12 @@ gtsam>=4.2,<4.3
 numpy<2
 matplotlib>=3.5
 pandas          # required by starfix's machine-readable almanac reader
+
+# Ground-truth validation (validate_ephemeris.py) — an INDEPENDENT ephemeris to
+# cross-check the Sun/Moon positions. Either engine works; both are optional and
+# the study degrades gracefully (skips the ground-truth section) if neither is
+# present. Keep numpy<2 for gtsam compatibility when installing these:
+#   pip install --no-deps "astropy<7" "pyerfa"     # ERFA/IAU-SOFA, no download
+#   pip install skyfield                           # needs a local JPL .bsp kernel
+astropy<7 ; python_version >= "3.9"   # ERFA builtin ephemeris (offline, independent)
+skyfield                              # optional: JPL DE kernel if one is available

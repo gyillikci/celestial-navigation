@@ -16,6 +16,21 @@
 
 6. **Geometry matters:** the fix is well-conditioned only when the Sun and Moon are well separated in azimuth (~90° here, a first-quarter Moon); near-parallel lines of position degrade it.
 
+## Ground-truth validation — are the Sun/Moon positions right?
+
+The whole study rests on the Sun/Moon positions from `starfix`'s almanac. Those are cross-checked here against an **independent** ephemeris (`astropy` — a separate implementation from the almanac's Skyfield/JPL source), over a 90-day grid. Residuals (arc-seconds):
+
+| Body | GHA rms / max | Dec rms / max | in km |
+|---|---|---|---|
+| Sun | 1.9″ / 3.8″ | 1.7″ / 3.0″ | ~0.07 km |
+| Moon | 4.0″ / 11.0″ | 2.4″ / 6.7″ | ~0.20 km |
+
+![groundtruth](results/fig_groundtruth.png)
+
+Both bodies agree to a **few arc-seconds** — far below the study's arc-minute measurement noise — confirming the ground truth. The residual floor is the almanac's 0.1′ table quantization plus hourly linear interpolation.
+
+> **This validation earned its keep.** The independent check first flagged a Moon-declination error of up to ~1.6° near the Dec≈0 crossings — a sign-handling bug in `starfix.parse_angle_string` for the almanac's `-00:MM.M` negative-zero-degree format (`float("-00")` is `-0.0`, and `-0.0 < 0` is `False`). It is now fixed; the Moon residual dropped from ~5700″ to a few arc-seconds. The study's canonical epoch (Moon at Dec +28°) was never affected. A **Stellarium** export can be added as a third witness — see `stellarium_reference.md`.
+
 ## The unified factor graph — everything fused
 
 One graph fuses every observable at once. Per Sun+Moon shot there is a pose `X(i)` (position + attitude), a velocity `V(i)` and a shared IMU bias `B`; consecutive keyframes are tied by IMU preintegration, and each shot contributes six celestial factors (altitude, azimuth and parallactic line, for the Sun and the Moon).

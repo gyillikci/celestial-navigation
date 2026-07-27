@@ -1,0 +1,6 @@
+# Stellarium ground-truth reference — TEMPLATE (see ../stellarium_reference.md).
+# Export Sun/Moon apparent GEOCENTRIC RA/Dec (of date, degrees) from Stellarium's
+# AstroCalc -> Ephemeris, then add rows below and save as stellarium_reference.csv.
+# Rows that are blank / start with '#' / have empty fields are skipped, so this
+# header-only template produces no comparison until you fill it in.
+utc,body,ra_deg,dec_deg

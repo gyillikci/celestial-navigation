@@ -42,6 +42,7 @@ instants (local minima of |ω|) to keep each IMU-photo pair clean.
 | `cloud.py` | Temporally-correlated cloud occlusion (Markov passages): drops obscured sights and coasts the anchor — graceful degradation and a coast-time budget. |
 | `capture_trigger.py` | Per-regime hand/platform disturbance model and the least-rotation "smart shutter" (gated vs. periodic). |
 | `scenario.py` | Sea/land/air ground truth from the ephemeris + noisy Sun+Moon measurements + IMU stream. |
+| `validate_ephemeris.py` | **Ground-truth check**: recomputes the Sun/Moon GHA/Dec from an *independent* engine (astropy/ERFA, or Skyfield/JPL if a kernel is present) and reports the residual vs the almanac. Also loads a **Stellarium** CSV export as a third witness (`stellarium_reference.md`). |
 | `celestial_factor_graph.py` | GTSAM graph: celestial altitude `CustomFactor` per sight, `ImuFactor` between shots, priors, LM solve, `Marginals` covariance. |
 | `baseline.py` | Incumbent `starfix` single-epoch two-LOP fix, for comparison. |
 | `run_study.py` | Runs the whole study → `results/` figures, `RESULTS.md`, `dashboard.html`. |
@@ -57,6 +58,7 @@ python -m unittest test.test_imu_fusion         # tests
 python -m imu_fusion.iphone_model
 python -m imu_fusion.capture_trigger
 python -m imu_fusion.scenario
+python -m imu_fusion.validate_ephemeris    # independent ground-truth check (needs astropy or skyfield)
 ```
 
 ## The unified fusion
@@ -141,7 +143,12 @@ on the Neural Engine/GPU and is out of scope here.
 - **Spherical Earth**; observer positions geocentric. Because truth *and*
   estimate share this convention, the reported error is a pure estimation error
   (unaffected by the geocentric-vs-geodetic figure offset). The Sun/Moon
-  **ephemeris is the real one** from `starfix` (nautical-almanac CSVs).
+  **ephemeris is the real one** from `starfix` (nautical-almanac CSVs), and it is
+  **independently cross-checked**: `validate_ephemeris.py` recomputes the GHA/Dec
+  from a separate engine (astropy/ERFA, or Skyfield/JPL, or a Stellarium export)
+  and finds agreement to a few arc-seconds — well under the arc-minute
+  measurement noise. That check caught a real sign bug in the almanac reader near
+  Dec ≈ 0; see the *Ground-truth validation* section of `RESULTS.md`.
 - Altitudes are **geometric** (refraction/parallax/semidiameter treated as
   pre-corrected); `starfix.Sight` already models those and would be layered in
   for a field build.

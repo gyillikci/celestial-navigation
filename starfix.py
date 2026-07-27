@@ -1706,14 +1706,20 @@ def parse_angle_string (angle_string : str) -> float:
             pass
     except ValueError as exc:
         raise ValueError ("Invalid data in angle specification") from exc
+    # A leading "-" on the degree field makes the whole angle negative -- even
+    # when the degree value is zero, e.g. "-00:47.6" (= -0.793 deg).  Testing
+    # `degrees < 0` fails there because float("-00") is -0.0 and -0.0 < 0 is
+    # False, which silently dropped the sign for any angle in (-1, 0) degrees
+    # (found via independent-ephemeris validation of Sun/Moon declinations).
+    neg = splitted[0].strip().startswith("-")
     ret_val = degrees
     if minutes is not None:
-        if degrees < 0:
-            minutes = -minutes
+        if neg:
+            minutes = -abs(minutes)
         ret_val += minutes / 60.0
     if seconds is not None:
-        if degrees < 0:
-            seconds = -seconds
+        if neg:
+            seconds = -abs(seconds)
         ret_val += seconds / 3600.0
     return ret_val
 
