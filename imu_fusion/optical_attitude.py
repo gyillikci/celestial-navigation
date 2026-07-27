@@ -128,7 +128,8 @@ class OpticalDiskSpec:
         ruler but only a ~2 deg compass from its bright limb.
     '''
     moon_axis_floor_deg: float = 0.10       # geometric feature (crater) axis
-    sun_axis_floor_deg: float = 0.60        # sunspot centroiding, when present
+    sun_axis_floor_deg: float = 0.20        # sunspot-pattern NCC roll (~0.09 deg
+                                            # measured on a resolved spot group)
     edge_px_sigma: float = 0.05             # per-limb-point localisation (NCC)
     bright_limb_floor_deg: float = 1.8      # best-case bright-limb PA (half phase)
 
@@ -173,29 +174,39 @@ def orientation_sigma_deg(body: str, state: KinematicState,
     return sqrt(fit_deg ** 2 + floor ** 2 + rot_deg ** 2)
 
 
-# Crater/mare NCC pattern-matching recovers the Moon's in-plane rotation to a
-# fraction of a degree -- demonstrated ~0.06 deg RMS on real full-Moon texture
-# (see lunar_orientation.recover_roll); inflated to a conservative deployment
-# floor for libration/phase mismatch, atmospheric blur and sensor noise.  Unlike
-# the bright limb it works BEST at full Moon.
+# NCC pattern-matching recovers a disk's in-plane rotation to a fraction of a
+# degree.  Demonstrated on real iPhone frames (lunar_orientation.recover_roll):
+#   * Moon craters/maria -> ~0.06 deg RMS (best at full Moon);
+#   * Sun sunspots        -> ~0.09 deg RMS when a good spot group is resolved.
+# Inflated to conservative deployment floors for reference mismatch, seeing,
+# solar rotation (Sun) / libration (Moon) and sensor noise.
 CRATER_ROLL_SIGMA_DEG = 0.3
+SUN_SPOT_ROLL_SIGMA_DEG = 0.2
+
+
+def pattern_roll_sigma_deg(body: str) -> float:
+    ''' Horizon-free roll sigma from surface-pattern NCC matching (crater/mare
+        for the Moon, sunspots for the Sun). '''
+    return (SUN_SPOT_ROLL_SIGMA_DEG if body.lower() == "sun"
+            else CRATER_ROLL_SIGMA_DEG)
 
 
 def parallactic_sigma_deg(body: str, state: KinematicState,
                           horizon_sigma_arcmin: float,
                           cam: TeleCameraSpec = DEFAULT_CAM,
                           disk: OpticalDiskSpec = DEFAULT_DISK,
-                          crater_roll: bool = False) -> float:
+                          pattern_roll: bool = False) -> float:
     ''' 1-sigma of the parallactic angle recovered from one disk [deg].
 
         q = PA - theta_image - roll: the error is the orientation-fit error and
         the error of the vertical/roll reference, in quadrature.  With
-        `crater_roll=True` the Moon's roll comes from crater/mare NCC matching
-        (a horizon-free ~0.3 deg reference) instead of the horizon vertical --
-        so the parallactic line survives with no horizon at all.
+        `pattern_roll=True` the roll comes from surface-pattern NCC matching
+        (Moon craters / Sun sunspots -- a horizon-free ~0.2-0.3 deg reference)
+        instead of the horizon vertical, so the parallactic line survives with
+        no horizon at all.
     '''
     s_orient = orientation_sigma_deg(body, state, cam, disk)
-    s_roll = (CRATER_ROLL_SIGMA_DEG if crater_roll
+    s_roll = (pattern_roll_sigma_deg(body) if pattern_roll
               else horizon_sigma_arcmin / 60.0)
     return sqrt(s_orient ** 2 + s_roll ** 2)
 

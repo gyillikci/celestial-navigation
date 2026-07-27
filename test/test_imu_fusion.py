@@ -277,7 +277,10 @@ class TestImuFusion(unittest.TestCase):
                                             **full), **sv)["rms_err_km"]
                        for s in range(4)) / 4.0
         wide, adap, uw = mean_rms("wide"), mean_rms("adaptive"), mean_rms("ultrawide")
-        self.assertGreater(wide, 2 * adap)      # wide-only loses the horizon
+        # Wide-only loses the optical horizon at altitude, but the horizon-free
+        # sunspot/crater parallactic softens the penalty, so it is worse than the
+        # adaptive lens but no longer 2x worse.
+        self.assertGreater(wide, 1.25 * adap)
         self.assertAlmostEqual(adap, uw, delta=0.3)
 
     def test_visual_anchor_bounds_drift_and_is_motion_immune(self):
@@ -420,15 +423,20 @@ class TestImuFusion(unittest.TestCase):
         ''' The crater-roll parallactic reference (horizon-free) is tighter than
             the bright-limb heading and does not need a horizon. '''
         from imu_fusion.optical_attitude import (parallactic_sigma_deg,
-                                                 CRATER_ROLL_SIGMA_DEG)
+                                                 CRATER_ROLL_SIGMA_DEG,
+                                                 SUN_SPOT_ROLL_SIGMA_DEG)
         from imu_fusion.iphone_model import KinematicState
         st = KinematicState(ang_rate=0.01, lin_accel=0.05)
-        # no horizon available (horizon sigma huge) but crater roll rescues it
-        s_crater = parallactic_sigma_deg("Moon", st, 600.0, crater_roll=True)
-        s_nohorizon = parallactic_sigma_deg("Moon", st, 600.0, crater_roll=False)
-        self.assertLess(s_crater, s_nohorizon)
-        self.assertLess(s_crater, 1.0)                 # sub-degree, horizon-free
+        # no horizon available (horizon sigma huge) but pattern roll rescues it
+        s_pat = parallactic_sigma_deg("Moon", st, 600.0, pattern_roll=True)
+        s_nohorizon = parallactic_sigma_deg("Moon", st, 600.0, pattern_roll=False)
+        self.assertLess(s_pat, s_nohorizon)
+        self.assertLess(s_pat, 1.0)                    # sub-degree, horizon-free
         self.assertAlmostEqual(CRATER_ROLL_SIGMA_DEG, 0.3, places=6)
+        # Sun with a resolved sunspot pattern also gives a horizon-free roll
+        s_sun = parallactic_sigma_deg("Sun", st, 600.0, pattern_roll=True)
+        self.assertLess(s_sun, 1.0)
+        self.assertAlmostEqual(SUN_SPOT_ROLL_SIGMA_DEG, 0.2, places=6)
 
     def test_elongation_budget(self):
         ''' Elongation is a strong TIME/longitude observable (dE/dt ~0.5 deg/hr)

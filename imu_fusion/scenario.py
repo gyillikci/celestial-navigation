@@ -258,7 +258,12 @@ def build_scenario(regime: str,
                          else sun_spots)
                 if avail:
                     q_true = parallactic_angle_deg(lat, lon, gp)
-                    par_sig = parallactic_sigma_deg(body, kin, href, cam)
+                    # The same resolved surface pattern that makes the disk
+                    # usable (Moon craters / Sun sunspots) also gives a
+                    # horizon-free roll, so the parallactic line does not lean on
+                    # the (possibly weak) horizon vertical.
+                    par_sig = parallactic_sigma_deg(body, kin, href, cam,
+                                                    pattern_roll=True)
                     par_meas = q_true + noise_scale * rng.gauss(0.0, par_sig)
                     par_valid = True
 
