@@ -1,0 +1,6 @@
+# Extra dependencies for the imu_fusion study (on top of the base project).
+# The official GTSAM wheel bundles a compatible NumPy (<2).
+gtsam>=4.2,<4.3
+numpy<2
+matplotlib>=3.5
+pandas          # required by starfix's machine-readable almanac reader

@@ -1,0 +1,57 @@
+<title>iPhone Sun+Moon Celestial Fix — IMU + Factor Graph</title>
+<style>
+:root{--bg:#0f1419;--card:#1a222c;--fg:#e6edf3;--mut:#9db0c0;--acc:#00b4d8;--hi:#3ddc97}
+@media (prefers-color-scheme:light){:root{--bg:#f5f7fa;--card:#fff;--fg:#12212e;--mut:#4a5b6b;--acc:#00798c;--hi:#0a7d54}}
+:root[data-theme=dark]{--bg:#0f1419;--card:#1a222c;--fg:#e6edf3;--mut:#9db0c0}
+:root[data-theme=light]{--bg:#f5f7fa;--card:#fff;--fg:#12212e;--mut:#4a5b6b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.wrap{max-width:1000px;margin:0 auto;padding:2rem 1.2rem}
+h1{font-size:1.7rem;margin:.2rem 0}.sub{color:var(--mut);margin-bottom:1.6rem}
+.card{background:var(--card);border-radius:14px;padding:1.1rem 1.3rem;margin:1rem 0;
+box-shadow:0 1px 3px rgba(0,0,0,.25)}
+h2{font-size:1.15rem;border-left:4px solid var(--acc);padding-left:.6rem}
+table{width:100%;border-collapse:collapse;margin:.4rem 0;font-size:.93rem}
+th,td{padding:.5rem .6rem;text-align:left;border-bottom:1px solid rgba(128,128,128,.2)}
+th{color:var(--mut);font-weight:600}td.hi{color:var(--hi);font-weight:700}
+figure{margin:1rem 0}img{width:100%;border-radius:10px;background:#fff}
+figcaption{color:var(--mut);font-size:.85rem;margin-top:.3rem}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media(max-width:640px){.grid{grid-template-columns:1fr}}
+.k{display:inline-block;background:var(--acc);color:#fff;border-radius:6px;
+padding:.05rem .5rem;font-size:.8rem;margin-right:.3rem}
+</style>
+<div class='wrap'>
+<h1>Daytime Sun + Moon Celestial Fix</h1>
+<div class='sub'>iPhone 17 Pro (modelled) · IMU synthetic horizon · GTSAM factor graph ·
+2026-03-24 12:00 UTC near Greenwich · Sun+Moon ~94° apart</div>
+
+<div class='card'>
+<h2>Headline: fusing many gated shots with IMU cuts error 4–10×</h2>
+<p><span class='k'>8 seeds</span> RMS horizontal position error (km), mean ± std.</p>
+<table><tr><th>Regime</th><th>starfix single-fix</th><th>Factor graph, no IMU</th>
+<th>Factor graph + IMU</th></tr>
+<tr><td>Land (stationary)</td><td>16.7 ± 1.5</td><td>16.7 ± 1.5</td><td class='hi'>4.1 ± 2.1</td></tr><tr><td>Sea (vessel + swell)</td><td>241.0 ± 35.2</td><td>157.1 ± 102.4</td><td class='hi'>25.4 ± 14.6</td></tr><tr><td>Air (aircraft)</td><td>75.5 ± 19.7</td><td>75.1 ± 19.3</td><td class='hi'>7.7 ± 4.4</td></tr></table>
+</div>
+
+<div class='card'>
+<h2>Least-rotation capture trigger</h2>
+<p>Firing the shutter at the calmest instants lowers the synthetic-horizon
+tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
+at sea even the calmest swell instant is too tilted, so the swell floor
+dominates and a gimbal/mount is needed.</p>
+<table><tr><th>Regime</th><th>gated σ</th><th>ungated σ</th><th>gated fix</th>
+<th>ungated fix</th></tr>
+<tr><td>Land (stationary)</td><td>6.4′</td><td>18.1′</td><td>5.7 ± 2.4</td><td>7.7 ± 4.8</td></tr><tr><td>Sea (vessel + swell)</td><td>95.9′</td><td>402.6′</td><td>26.2 ± 14.5</td><td>23.1 ± 12.5</td></tr><tr><td>Air (aircraft)</td><td>22.2′</td><td>138.3′</td><td>8.6 ± 3.1</td><td>16.4 ± 9.6</td></tr></table>
+</div>
+
+<div class='card'><h2>Figures</h2><figure><img src='results/fig_main.png'><figcaption>Factor graph vs incumbent single-fix</figcaption></figure><figure><img src='results/fig_gating.png'><figcaption>Least-rotation shutter</figcaption></figure><figure><img src='results/fig_convergence.png'><figcaption>Error vs number of shots</figcaption></figure><figure><img src='results/fig_trigger.png'><figcaption>Trigger picking calm instants</figcaption></figure><figure><img src='results/fig_ellipse.png'><figcaption>Fix with covariance ellipse</figcaption></figure></div>
+
+<div class='card'><h2>How it works</h2>
+<p>The phone is a digital theodolite: its IMU gives the local vertical (a
+gravity-derived artificial horizon, no sea-horizon dip) and the camera gives the
+direction to the Sun and Moon. Each shot yields two altitude lines of position;
+GTSAM fuses them across shots, linked by IMU preintegration, into one trajectory
+with a covariance. A single hand-held phone sight is weak (~6–70′ of horizon
+tilt); the win comes from fusing many <em>calm</em> shots.</p></div>
+</div>
