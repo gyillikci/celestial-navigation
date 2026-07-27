@@ -442,7 +442,16 @@ class TestImuFusion(unittest.TestCase):
         g = np.clip(disk + rng.normal(0, 1.2, disk.shape), 0, 255)
         fit = subpixel_limb(g)
         self.assertLess(abs(fit["R"] - R0), 1.0)       # full disk, not a sliver
-        self.assertLess(abs(fit["cx"] - cx0), 1.0)
+        self.assertLess(abs(fit["cx"] - cx0), 1.0)     # TRUE centre from the arc
+        self.assertLess(abs(fit["cy"] - cy0), 1.0)
+        # The full-circle centre must be the true centre, NOT the lit-blob
+        # centroid -- the unlit half is still there even though it is not seen.
+        lit = g > 0.5 * g.max()
+        ly, lx = np.nonzero(lit)
+        lit_centroid_x = lx.mean()
+        self.assertGreater(abs(lit_centroid_x - cx0), 30)   # centroid is biased
+        self.assertLess(abs(fit["cx"] - cx0),
+                        abs(lit_centroid_x - cx0))          # fit is far better
 
     def test_crater_ncc_recovers_roll_sub_degree(self):
         ''' Rotational NCC of the resolved Moon disk against a reference recovers

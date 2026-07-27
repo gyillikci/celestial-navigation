@@ -116,7 +116,15 @@ def _seed(g, sky, bright):
 
 def subpixel_limb(g, seed=None, n_rays=1440, half_window=12.0):
     ''' Sub-pixel limb fit.  Returns dict with cx, cy, R, rmse (px), n_points,
-        and the accepted ray angles (rad) + points (Nx2). '''
+        and the accepted ray angles (rad) + points (Nx2).
+
+        (cx, cy) is the TRUE disk centre: only the illuminated LIMB arc (a sharp
+        bright->sky edge) is used and the FULL circle is fitted through it, so the
+        centre is correct even for a crescent/quarter where most of the disk is
+        unseen.  This is deliberately NOT the centroid of the lit blob -- that
+        centroid is pulled toward the bright limb (e.g. ~9' at first quarter,
+        ~17 km of position error if mistaken for the Moon's position).  The unlit
+        half is still there; the circle fit puts it back. '''
     g = np.asarray(g, float)
     sky = np.percentile(g, 20)
     bright = np.percentile(g, 99)
