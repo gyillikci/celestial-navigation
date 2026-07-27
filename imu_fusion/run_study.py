@@ -546,6 +546,55 @@ def plot_groundtruth(gt, path):
     plt.close(fig)
 
 
+def exp_elongation_budget():
+    ''' Position error budget at the canonical epoch, including the Sun-Moon
+        elongation as a TIME (longitude) observable vs a direct position line. '''
+    from .elongation import position_budget
+    iso = EPOCH.strftime("%Y-%m-%d %H:%M:%S")
+    out = {"iso": iso}
+    for s in (0.5, 1.0, 2.0, 4.0):
+        out[f"sep_{s}"] = position_budget(iso, 51.5, 0.0, sigma_alt_arcmin=2.0,
+                                          sigma_sep_arcmin=s)
+    out["base"] = out["sep_2.0"]
+    return out
+
+
+def plot_elongation(eb, path):
+    ''' Position budget: altitude LOPs and the two-body fix vs the elongation
+        time->longitude channel across separation-measurement precision. '''
+    base = eb["base"]
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.4))
+    # left: per-observable position sigma (km)
+    labels = ["Sun alt\nLOP", "Moon alt\nLOP", "two-body\nfix", "elong→\nlongitude"]
+    vals = [base["alt_sun_km"], base["alt_moon_km"], base["two_lop_fix_km"],
+            base["elong_longitude_km"]]
+    cols = ["#c8992e", "#5b6b86", "#3ddc97", "#00b4d8"]
+    a1.bar(labels, vals, color=cols)
+    for i, v in enumerate(vals):
+        a1.text(i, v + 1, f"{v:.0f}", ha="center", fontsize=9)
+    a1.set_ylabel("position 1σ (km)")
+    a1.set_title(f"Single-epoch budget  (σ_alt=2′, σ_sep=2′, ΔAz={base['delta_az_deg']:.0f}°)")
+    a1.text(0.5, 0.92, "elongation direct position line: negligible (parallax-only)",
+            transform=a1.transAxes, ha="center", fontsize=7.5, color="#b06a12")
+    # right: elongation->longitude vs separation-measurement precision
+    seps = [0.5, 1.0, 2.0, 4.0]
+    lon = [eb[f"sep_{s}"]["elong_longitude_km"] for s in seps]
+    tim = [eb[f"sep_{s}"]["elong_time_s"] for s in seps]
+    a2.plot(seps, lon, "o-", color="#00b4d8", label="longitude (km)")
+    a2.set_xlabel("Sun–Moon separation measurement σ (arc-min)")
+    a2.set_ylabel("longitude 1σ (km)", color="#00b4d8")
+    a2b = a2.twinx()
+    a2b.plot(seps, tim, "s--", color="#9db0c0", label="clock (s)")
+    a2b.set_ylabel("recovered clock 1σ (s)", color="#7a8a99")
+    a2.set_title(f"Lunar-distance clock  (dE/dt={base['dE_dt_deg_per_hr']:.2f}°/hr)")
+    a2.grid(alpha=0.3)
+    fig.suptitle("Position error budget — altitude sights vs Sun–Moon elongation",
+                 fontsize=11)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
 def plot_cloud(cd, path):
     ''' Fix RMS (bars) and shot availability (line) vs cloud cover. '''
     fig, ax = plt.subplots(figsize=(8.5, 4.6))
@@ -1023,6 +1072,40 @@ def write_results_md(data, path):
                  "export can be added as a third witness — see "
                  "`stellarium_reference.md`.\n")
 
+    # ------- elongation / position error budget -------
+    eb = data.get("elongation")
+    if eb:
+        base = eb["base"]
+        L.append("## Position error budget — and the Sun–Moon elongation\n")
+        L.append("Where does the fix error come from, and what does measuring "
+                 "the **Sun–Moon angular separation** (elongation) add? Single "
+                 "epoch, σ = 2′ per sight:\n")
+        L.append("| Observable | position 1σ | role |")
+        L.append("|---|---|---|")
+        L.append(f"| Sun altitude LOP | {base['alt_sun_km']:.1f} km | position "
+                 f"line (1′ = 1 nmi) |")
+        L.append(f"| Moon altitude LOP | {base['alt_moon_km']:.1f} km | position "
+                 f"line |")
+        L.append(f"| **Two-body fix** | **{base['two_lop_fix_km']:.1f} km** | LOPs "
+                 f"cross at ΔAz={base['delta_az_deg']:.0f}° (good geometry) |")
+        L.append(f"| Elongation → **time** | {base['elong_longitude_km']:.0f} km | "
+                 f"dE/dt={base['dE_dt_deg_per_hr']:.2f}°/hr → clock to "
+                 f"{base['elong_time_s']:.0f} s → longitude |")
+        L.append(f"| Elongation → direct pos | negligible | parallax-only, "
+                 f"observer-independent |")
+        L.append("\n![elongation budget](results/fig_elongation.png)\n")
+        L.append("**Reading it.** The two altitude sights are the workhorses — a "
+                 f"~{base['two_lop_fix_km']:.0f} km single-epoch fix, driven down "
+                 "to the headline few-km numbers by fusing many gated shots. The "
+                 "**elongation is a poor _direct_ position line** (it barely "
+                 "changes with where you stand — only lunar parallax moves it), "
+                 "**but a strong _time_ observable**: the Moon slides ~0.5°/hr "
+                 "against the Sun, so measuring the separation to a few arc-"
+                 "minutes fixes UTC to minutes and hence longitude — the classic "
+                 "*lunar-distance* method. That is exactly the lever when a "
+                 "photo's timestamp is missing: the sky itself carries the "
+                 "clock.\n")
+
     # ------- unified full-fusion section -------
     ab = data["ablation"]
     L.append("## The unified factor graph — everything fused\n")
@@ -1484,6 +1567,33 @@ A <b>Stellarium</b> export can be dropped in as a third witness — see
 <code>stellarium_reference.md</code>.</p>
 </div>
 """
+    eb = data.get("elongation")
+    el_card = ""
+    if eb:
+        base = eb["base"]
+        el_card = f"""
+<div class='card'>
+<h2>Position error budget — and what the Sun–Moon elongation buys</h2>
+<p>Single epoch, σ = 2′ per sight. The two <b>altitude</b> sights are the
+workhorses — a ~{base['two_lop_fix_km']:.0f} km fix at ΔAz={base['delta_az_deg']:.0f}°,
+pushed to the headline few-km numbers by fusing many gated shots. The <b>Sun–Moon
+elongation</b> is a <em>poor direct position line</em> (only lunar parallax moves
+it), but a <em>strong time observable</em>: the Moon slides
+{base['dE_dt_deg_per_hr']:.2f}°/hr against the Sun, so the separation fixes UTC to
+~{base['elong_time_s']:.0f} s → longitude ~{base['elong_longitude_km']:.0f} km — the
+classic <b>lunar-distance</b> method, and exactly the lever when a photo's
+timestamp is stripped: the sky carries the clock.</p>
+<table><tr><th>Observable</th><th>position 1σ</th><th>role</th></tr>
+<tr><td>Sun altitude LOP</td><td class='mono'>{base['alt_sun_km']:.1f} km</td><td>position line (1′=1 nmi)</td></tr>
+<tr><td>Moon altitude LOP</td><td class='mono'>{base['alt_moon_km']:.1f} km</td><td>position line</td></tr>
+<tr><td>Two-body fix</td><td class='mono hi'>{base['two_lop_fix_km']:.1f} km</td><td>LOPs cross at ΔAz={base['delta_az_deg']:.0f}°</td></tr>
+<tr><td>Elongation → time</td><td class='mono'>{base['elong_longitude_km']:.0f} km</td><td>clock → longitude</td></tr>
+<tr><td>Elongation → direct</td><td class='mono dim'>negligible</td><td>parallax-only</td></tr></table>
+<figure><img src='results/fig_elongation.png'><figcaption>Left: per-observable
+position σ. Right: the elongation-as-clock precision vs how well the Sun–Moon
+separation is measured.</figcaption></figure>
+</div>
+"""
     imgs = "".join(
         f"<figure><img src='results/{fn}'><figcaption>{cap}</figcaption></figure>"
         for fn, cap in [
@@ -1654,6 +1764,7 @@ with cloud cover; shot availability tracks the clear sky.</figcaption></figure>
 bodies are lost: sub-km for ~2 minutes, then dead-reckoning runs away.</figcaption></figure>
 </div>
 {gt_card}
+{el_card}
 
 <div class='card'>
 <h2>Least-rotation capture trigger</h2>
@@ -1693,6 +1804,7 @@ def main():
                 anchor_drift=exp_anchor_drift(), anchor_fix=exp_anchor_fix(),
                 cloud=exp_cloud(), coast=exp_coast(),
                 groundtruth=exp_groundtruth(),
+                elongation=exp_elongation_budget(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)
@@ -1702,6 +1814,7 @@ def main():
     plot_gating(data["gating"], os.path.join(OUT, "fig_gating.png"))
     plot_horizon(data["horizon"], os.path.join(OUT, "fig_horizon.png"))
     plot_optical(data["optical"], os.path.join(OUT, "fig_optical.png"))
+    plot_elongation(data["elongation"], os.path.join(OUT, "fig_elongation.png"))
     plot_factorgraph(os.path.join(OUT, "fig_factorgraph.png"))
     plot_ablation(data["ablation"], os.path.join(OUT, "fig_ablation.png"))
     plot_realtime(data["realtime"], os.path.join(OUT, "fig_realtime.png"))

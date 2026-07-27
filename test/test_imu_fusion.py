@@ -403,6 +403,47 @@ class TestImuFusion(unittest.TestCase):
         sun_head = optical_heading_sigma_deg("Sun", st)
         self.assertGreater(moon_head, sun_head)        # Sun disk is the better heading
 
+    def test_crater_ncc_recovers_roll_sub_degree(self):
+        ''' Rotational NCC of the resolved Moon disk against a reference recovers
+            the in-plane rotation (camera roll) to well under a degree -- the
+            crater/mare pattern is a far stronger orientation reference than the
+            ~2 deg bright limb, and it works at full Moon. '''
+        from imu_fusion.lunar_orientation import render_moon, recover_roll, _rotate
+        ref, (cx, cy, r) = render_moon(size=221, libration=(3.0, -2.0))
+        for true in (6.4, -15.2, 28.0):
+            target = _rotate(ref, true, cx, cy)        # rotate real-ish texture
+            out = recover_roll(target, ref, (cx, cy), r, coarse=1.0)
+            self.assertLess(abs(out["roll"] - true), 0.5)
+            self.assertGreater(out["ncc"], 0.95)
+
+    def test_crater_roll_beats_bright_limb_for_parallactic(self):
+        ''' The crater-roll parallactic reference (horizon-free) is tighter than
+            the bright-limb heading and does not need a horizon. '''
+        from imu_fusion.optical_attitude import (parallactic_sigma_deg,
+                                                 CRATER_ROLL_SIGMA_DEG)
+        from imu_fusion.iphone_model import KinematicState
+        st = KinematicState(ang_rate=0.01, lin_accel=0.05)
+        # no horizon available (horizon sigma huge) but crater roll rescues it
+        s_crater = parallactic_sigma_deg("Moon", st, 600.0, crater_roll=True)
+        s_nohorizon = parallactic_sigma_deg("Moon", st, 600.0, crater_roll=False)
+        self.assertLess(s_crater, s_nohorizon)
+        self.assertLess(s_crater, 1.0)                 # sub-degree, horizon-free
+        self.assertAlmostEqual(CRATER_ROLL_SIGMA_DEG, 0.3, places=6)
+
+    def test_elongation_budget(self):
+        ''' Elongation is a strong TIME/longitude observable (dE/dt ~0.5 deg/hr)
+            but a negligible DIRECT position line (parallax-only); the two-body
+            altitude fix is a few km with good crossing geometry. '''
+        from imu_fusion.elongation import position_budget
+        b = position_budget("2026-03-24 12:00:00", 51.5, 0.0,
+                            sigma_alt_arcmin=2.0, sigma_sep_arcmin=2.0)
+        self.assertAlmostEqual(b["alt_sun_km"], 2.0 * 1.852, places=2)
+        self.assertTrue(0.3 < abs(b["dE_dt_deg_per_hr"]) < 0.7)   # Moon motion
+        self.assertGreater(b["delta_az_deg"], 60)                 # good geometry
+        self.assertLess(b["two_lop_fix_km"], 8.0)                 # few-km fix
+        self.assertLess(b["elong_longitude_km"], 120)            # time->longitude
+        self.assertTrue(b["elong_direct_negligible"])            # weak direct LOP
+
     def test_groundtruth_matches_independent_ephemeris(self):
         ''' If an independent engine is installed, the almanac's Sun/Moon GHA and
             Dec must agree with it to well under an arc-minute over a time grid.

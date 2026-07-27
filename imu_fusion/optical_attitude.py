@@ -173,18 +173,30 @@ def orientation_sigma_deg(body: str, state: KinematicState,
     return sqrt(fit_deg ** 2 + floor ** 2 + rot_deg ** 2)
 
 
+# Crater/mare NCC pattern-matching recovers the Moon's in-plane rotation to a
+# fraction of a degree -- demonstrated ~0.06 deg RMS on real full-Moon texture
+# (see lunar_orientation.recover_roll); inflated to a conservative deployment
+# floor for libration/phase mismatch, atmospheric blur and sensor noise.  Unlike
+# the bright limb it works BEST at full Moon.
+CRATER_ROLL_SIGMA_DEG = 0.3
+
+
 def parallactic_sigma_deg(body: str, state: KinematicState,
                           horizon_sigma_arcmin: float,
                           cam: TeleCameraSpec = DEFAULT_CAM,
-                          disk: OpticalDiskSpec = DEFAULT_DISK) -> float:
+                          disk: OpticalDiskSpec = DEFAULT_DISK,
+                          crater_roll: bool = False) -> float:
     ''' 1-sigma of the parallactic angle recovered from one disk [deg].
 
         q = PA - theta_image - roll: the error is the orientation-fit error and
-        the error of the vertical/roll reference (the horizon reference sigma),
-        in quadrature.
+        the error of the vertical/roll reference, in quadrature.  With
+        `crater_roll=True` the Moon's roll comes from crater/mare NCC matching
+        (a horizon-free ~0.3 deg reference) instead of the horizon vertical --
+        so the parallactic line survives with no horizon at all.
     '''
     s_orient = orientation_sigma_deg(body, state, cam, disk)
-    s_roll = horizon_sigma_arcmin / 60.0
+    s_roll = (CRATER_ROLL_SIGMA_DEG if crater_roll
+              else horizon_sigma_arcmin / 60.0)
     return sqrt(s_orient ** 2 + s_roll ** 2)
 
 

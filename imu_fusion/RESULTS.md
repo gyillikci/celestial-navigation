@@ -31,6 +31,22 @@ Both bodies agree to a **few arc-seconds** — far below the study's arc-minute 
 
 > **This validation earned its keep.** The independent check first flagged a Moon-declination error of up to ~1.6° near the Dec≈0 crossings — a sign-handling bug in `starfix.parse_angle_string` for the almanac's `-00:MM.M` negative-zero-degree format (`float("-00")` is `-0.0`, and `-0.0 < 0` is `False`). It is now fixed; the Moon residual dropped from ~5700″ to a few arc-seconds. The study's canonical epoch (Moon at Dec +28°) was never affected. A **Stellarium** export can be added as a third witness — see `stellarium_reference.md`.
 
+## Position error budget — and the Sun–Moon elongation
+
+Where does the fix error come from, and what does measuring the **Sun–Moon angular separation** (elongation) add? Single epoch, σ = 2′ per sight:
+
+| Observable | position 1σ | role |
+|---|---|---|
+| Sun altitude LOP | 3.7 km | position line (1′ = 1 nmi) |
+| Moon altitude LOP | 3.7 km | position line |
+| **Two-body fix** | **5.3 km** | LOPs cross at ΔAz=94° (good geometry) |
+| Elongation → **time** | 63 km | dE/dt=0.55°/hr → clock to 217 s → longitude |
+| Elongation → direct pos | negligible | parallax-only, observer-independent |
+
+![elongation budget](results/fig_elongation.png)
+
+**Reading it.** The two altitude sights are the workhorses — a ~5 km single-epoch fix, driven down to the headline few-km numbers by fusing many gated shots. The **elongation is a poor _direct_ position line** (it barely changes with where you stand — only lunar parallax moves it), **but a strong _time_ observable**: the Moon slides ~0.5°/hr against the Sun, so measuring the separation to a few arc-minutes fixes UTC to minutes and hence longitude — the classic *lunar-distance* method. That is exactly the lever when a photo's timestamp is missing: the sky itself carries the clock.
+
 ## The unified factor graph — everything fused
 
 One graph fuses every observable at once. Per Sun+Moon shot there is a pose `X(i)` (position + attitude), a velocity `V(i)` and a shared IMU bias `B`; consecutive keyframes are tied by IMU preintegration, and each shot contributes six celestial factors (altitude, azimuth and parallactic line, for the Sun and the Moon).

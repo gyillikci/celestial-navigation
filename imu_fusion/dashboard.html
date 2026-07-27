@@ -181,6 +181,29 @@ A <b>Stellarium</b> export can be dropped in as a third witness — see
 
 
 <div class='card'>
+<h2>Position error budget — and what the Sun–Moon elongation buys</h2>
+<p>Single epoch, σ = 2′ per sight. The two <b>altitude</b> sights are the
+workhorses — a ~5 km fix at ΔAz=94°,
+pushed to the headline few-km numbers by fusing many gated shots. The <b>Sun–Moon
+elongation</b> is a <em>poor direct position line</em> (only lunar parallax moves
+it), but a <em>strong time observable</em>: the Moon slides
+0.55°/hr against the Sun, so the separation fixes UTC to
+~217 s → longitude ~63 km — the
+classic <b>lunar-distance</b> method, and exactly the lever when a photo's
+timestamp is stripped: the sky carries the clock.</p>
+<table><tr><th>Observable</th><th>position 1σ</th><th>role</th></tr>
+<tr><td>Sun altitude LOP</td><td class='mono'>3.7 km</td><td>position line (1′=1 nmi)</td></tr>
+<tr><td>Moon altitude LOP</td><td class='mono'>3.7 km</td><td>position line</td></tr>
+<tr><td>Two-body fix</td><td class='mono hi'>5.3 km</td><td>LOPs cross at ΔAz=94°</td></tr>
+<tr><td>Elongation → time</td><td class='mono'>63 km</td><td>clock → longitude</td></tr>
+<tr><td>Elongation → direct</td><td class='mono dim'>negligible</td><td>parallax-only</td></tr></table>
+<figure><img src='results/fig_elongation.png'><figcaption>Left: per-observable
+position σ. Right: the elongation-as-clock precision vs how well the Sun–Moon
+separation is measured.</figcaption></figure>
+</div>
+
+
+<div class='card'>
 <h2>Least-rotation capture trigger</h2>
 <p>Firing the shutter at the calmest instants lowers the synthetic-horizon
 tilt error 3–6×. That converts to ≈2× lower fix error on land and in the air;
