@@ -27,6 +27,44 @@ from math import sin, cos, asin, atan2, radians, degrees, sqrt, pi
 from starfix import (Sight, LatLonGeodetic, LatLonGeocentric, get_azimuth,
                      EARTH_RADIUS)
 
+
+def _dedupe_almanacs() -> list:
+    ''' Drop duplicated timestamps from the vendored almanac tables.
+
+        THE BUG THIS WORKS AROUND.  1 January of 2026, 2027, 2028 and 2030 is
+        present TWICE in `sun-moon` and `planets` (96 timestamps each, 192 rows),
+        and four days are doubled in `sun-moon-sd`.  A duplicated index makes
+        `df.loc[ts]` return a DataFrame instead of a Series, the column lookup
+        comes back empty, and the failure surfaces far downstream as
+
+            ValueError: Invalid number of items in angle specification
+
+        which reads like a malformed angle and is nothing of the kind.  Every
+        sight on New Year's Day raises it.
+
+        The duplicate rows are byte-identical -- verified before writing this --
+        so dropping the extras changes no value; it only makes the index unique
+        again.  Done once at import, and reported so the repair is visible rather
+        than silent.  Returns the tables it touched.
+    '''
+    from starfix import Almanac
+    fixed = []
+    for name in ("sun-moon", "planets", "sun-moon-sd", "venus-mars-hp"):
+        try:
+            alm = Almanac.get_almanac(name)
+        except Exception:                      # table absent in this build
+            continue
+        df = getattr(alm, "pd", None)
+        if df is None or not df.index.has_duplicates:
+            continue
+        n = len(df)
+        alm.pd = df[~df.index.duplicated(keep="first")]
+        fixed.append((name, n - len(alm.pd)))
+    return fixed
+
+
+ALMANAC_DUPLICATES_DROPPED = _dedupe_almanacs()
+
 # A body's angular semidiameter is already removed by working with the disk
 # centre; refraction/parallax are treated as pre-corrected ("observed
 # altitude").  The study therefore uses purely geometric altitudes, which keeps
@@ -112,7 +150,10 @@ def body_distance_km(object_name: str, time_iso: str) -> float:
     name = object_name.lower()
     if name == "moon":
         from starfix import get_mr_item, parse_angle_string, ObsTypes
-        hour_iso = time_iso[:13] + ":00:00"
+        # The almanac index is space-separated ("2026-07-28 19:00:00"); an ISO
+        # "T" here raises AlmanacRangeException, which reads like an
+        # out-of-range date and is not.
+        hour_iso = time_iso[:13].replace("T", " ") + ":00:00"
         hp_deg = parse_angle_string(get_mr_item("moon", hour_iso, ObsTypes.HP))
         return EARTH_RADIUS / sin(radians(hp_deg))
     return 1.495978707e8            # Sun mean distance (km)

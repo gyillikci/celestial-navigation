@@ -292,3 +292,86 @@ The optical disk gives a heading several times better than the magnetometer, whi
 - Spherical Earth; observer positions geocentric; Sun/Moon ephemeris reused verbatim from `starfix` (real nautical almanac).
 - Altitudes are geometric (refraction/parallax/semidiameter treated as pre-corrected). A ~30 km dead-reckoning offset seeds the coarse prior, so reported accuracy comes from the sky, not the prior.
 - The synthetic horizon comes from the phone's gravity vector (no sea-horizon dip); its dominant error is IMU tilt, which the least-rotation shutter minimises.
+
+## Reading the Moon's face: libration, the terminator, and a real photograph
+
+A full-Moon photograph (IMG_7790.JPG, 1920×1080, no EXIF) taken from Istanbul was
+used to close the loop on the lunar-orientation chain. `lunar_orientation.render_moon`
+had always taken libration and the axis position angle as **inputs that nothing
+computed** — they defaulted to zero. This supplies them, and then checks them
+against the photograph rather than against itself.
+
+**Where the pieces come from.**
+
+| quantity | source |
+|---|---|
+| libration (l, b), axis position angle P | `lunar_geometry`, Meeus ch. 53 optical terms |
+| topocentric correction | first-order parallax, rotated into the disk frame by P |
+| sub-solar point / terminator | `lunar_texture.subsolar_point`, Meeus ch. 53 |
+| crater texture | Stellarium `textures/moon_4k.jpg` — USGS/Clementine, public domain |
+| feature names | `lunar_features`, 55 entries, hand-typed catalogue centres |
+
+**Validation of the geometry.** Meeus's worked example 53.a (1992 April 12) cannot
+run through this project's ephemeris — the almanac only spans 2024–2030 — so
+`libration_from_ecliptic` was split out and fed his own λ, β, α. It returns
+l = −1.210°, b = +4.194°, P = +15.066° against his −1.206, +4.194, 15.08. The
+residual is the physical libration, which is deliberately not modelled.
+
+**The measurement.** The disk was fitted to 0.23 px, then 20 named craters spread
+over the disk were located by patch cross-correlation against a render and six
+parameters least-squared to them:
+
+| | measured | ephemeris (20:45 UTC) |
+|---|---|---|
+| disk centre | (975.7, 512.3) px | — |
+| disk radius | 324.10 px | — |
+| in-image rotation | +3.35° | P − q = +0.80° |
+| **sub-Earth point** | **−2.43°E, +4.57°N** | −2.52, +4.49 |
+| tie-point residual | **0.177 px rms**, 20 points | — |
+
+**The photograph detects the observer's own parallax.** The *geocentric*
+libration at that epoch is (−2.50, +3.67); the *topocentric* value for Istanbul
+is (−2.52, +4.49). The measurement, +4.57 ± 0.04, sits on the topocentric value
+and is 0.9° — some twenty formal sigma — away from the geocentric one. Standing
+on the Earth's surface rather than at its centre visibly moves the Moon's face,
+and a 322-pixel disk resolves it.
+
+**Dating the photograph.** Two independent observables agree:
+
+* libration drifts ~0.1°/hour; the measured pair matches **20:00–22:00 UTC** on
+  2026-07-28, best at 21:00 (miss 0.11°);
+* the implied camera roll passes through zero at **20:30 UTC**.
+
+Together: **2026-07-28 20:30–21:00 UTC**, i.e. 23:30–00:00 local. Colongitude
+84.3°, so the Moon was a few hours short of full and the unlit lune was about
+2 px wide — which is why the limb detector returned nothing over a 73.5° arc
+centred on image angle 289° and returned a clean circle everywhere else.
+
+### Two things that went wrong, and what they teach
+
+**1. A sign error that hid behind small residuals.** `tie_points` slides the
+*render* window to match a fixed photograph window, so the feature's position in
+the photograph is `x − dx`, not `x + dx`. With the sign flipped the residuals
+stayed at 0.2–0.5 px and looked healthy, because the six-parameter model simply
+absorbed the error into the disk centre. What exposed it was **starting the solve
+from different epochs**: the answer tracked the starting guess almost one-for-one,
+and the solve/re-render loop *diverged*, doubling the libration error every round
+(0.22° → 0.51° → 1.09° → 2.75°). A fit that is not guess-independent is not a
+measurement, whatever its residual says.
+
+**2. Libration is 0.96-correlated with the disk centre.** A small libration
+rotates the sphere about a diameter, which to first order simply *translates* the
+near-side pattern — exactly what moving the disk centre does. Only the
+second-order differential foreshortening separates them. Both facts are now
+asserted in `TestLunarMatch` so neither can quietly return.
+
+**And one in the data.** 1 January of 2026, 2027, 2028 and 2030 is duplicated in
+the vendored almanac (192 rows in `sun-moon` and `planets`, 4 days in
+`sun-moon-sd`). A duplicated index makes `df.loc[ts]` return a DataFrame, the
+column lookup comes back empty, and the failure surfaces as
+`ValueError: Invalid number of items in angle specification` — which reads like a
+malformed angle and is not. Every sight on New Year's Day raised it. The
+duplicate rows are byte-identical, so `astro._dedupe_almanacs` drops the extras
+at import and reports what it dropped.
+
+![Moon match](results/fig_moon_match.png)

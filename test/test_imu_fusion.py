@@ -10,6 +10,7 @@
 import os
 import sys
 import random
+import math
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1464,6 +1465,288 @@ class TestRealTerrainResection(unittest.TestCase):
         self.assertLess(good, bad,
                         f"residual failed to flag the wrong position "
                         f"(truth {good:.2f} px vs decoy {bad:.2f} px)")
+
+
+class TestLunarGeometry(unittest.TestCase):
+    """Libration, the axis position angle, and the sub-solar point."""
+
+    SITE = (41.0082, 28.9784)          # Istanbul
+    T = "2026-07-28T20:45:00"
+
+    def test_meeus_worked_example(self):
+        """Meeus, Astronomical Algorithms 2nd ed., example 53.a.
+
+        The almanac this project uses only spans 2024-2030, so 1992 April 12
+        cannot go through the ephemeris; feeding Meeus's own lambda/beta/alpha
+        into the ch.53 geometry is the only independent check available with no
+        network.  His answer includes the PHYSICAL libration, worth about
+        0.03 deg, which is why the longitude tolerance is looser than the
+        latitude's rather than because the latitude got lucky.
+        """
+        from imu_fusion.lunar_geometry import libration_from_ecliptic
+        l, b, P = libration_from_ecliptic(133.162655, -3.229126, 134.688470,
+                                          -0.077221081451, 0.004610, 23.440636)
+        self.assertAlmostEqual(l, -1.206, delta=0.02)
+        self.assertAlmostEqual(b, +4.194, delta=0.01)
+        self.assertAlmostEqual(P, 15.08, delta=0.05)
+
+    def test_libration_stays_inside_its_physical_bounds(self):
+        """Optical libration cannot exceed roughly +/-8 deg and +/-7 deg.
+
+        Those bounds come from the orbit -- eccentricity for longitude, axial
+        tilt for latitude -- so a formula that breaches them is wrong no matter
+        how plausible any single value looks.  Sampled over a year rather than
+        at one epoch, because a sign error can hide for weeks.
+        """
+        from datetime import datetime, timedelta
+        from imu_fusion.lunar_geometry import geocentric_libration
+        t0 = datetime(2026, 1, 1)
+        lo, la, pa = [], [], []
+        for h in range(0, 365 * 24, 12):
+            iso = (t0 + timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%S")
+            g = geocentric_libration(iso)
+            lo.append(g["lon"]); la.append(g["lat"]); pa.append(g["pole_pa"])
+        self.assertLess(max(abs(min(lo)), abs(max(lo))), 8.5)
+        self.assertGreater(max(lo) - min(lo), 10.0)       # it must actually move
+        self.assertLess(max(abs(min(la)), abs(max(la))), 7.2)
+        self.assertGreater(max(la) - min(la), 10.0)
+        self.assertLess(max(abs(min(pa)), abs(max(pa))), 26.0)
+
+    def test_topocentric_shift_is_of_order_the_parallax(self):
+        """Being on the surface rather than at the centre moves the sub-Earth
+        point by about the horizontal parallax, ~1 deg, and never by more."""
+        from imu_fusion.lunar_geometry import (geocentric_libration,
+                                               topocentric_libration)
+        g = geocentric_libration(self.T)
+        t = topocentric_libration(self.T, *self.SITE)
+        shift = math.hypot(t["lon"] - g["lon"], t["lat"] - g["lat"])
+        self.assertGreater(shift, 0.2)
+        self.assertLess(shift, 1.4)
+        self.assertLess(t["parallax_deg"], 1.1)
+
+    def test_subsolar_point_tracks_the_phase(self):
+        """Selenographic colongitude is the lunar clock: 90 deg at full Moon,
+        advancing ~12.2 deg/day.  Checked as a RATE as well as a value, because
+        a constant offset would pass a single-epoch assertion."""
+        from imu_fusion.lunar_texture import subsolar_point
+        a = subsolar_point("2026-07-28T20:45:00")
+        b = subsolar_point("2026-07-29T20:45:00")
+        self.assertAlmostEqual(a["colongitude"], 84.3, delta=1.0)
+        drift = (b["colongitude"] - a["colongitude"]) % 360.0
+        self.assertAlmostEqual(drift, 12.2, delta=0.6)
+        self.assertLess(abs(a["lat"]), 1.6)     # the Sun stays near the equator
+
+    def test_features_near_centre_finds_sinus_medii(self):
+        """With the sub-Earth point a couple of degrees from (0, 0), the nearest
+        named feature must be Sinus Medii -- the Central Bay is central."""
+        from imu_fusion.lunar_geometry import (topocentric_libration,
+                                               features_near_centre)
+        lib = topocentric_libration(self.T, *self.SITE)
+        near = features_near_centre(lib["lon"], lib["lat"], 0.30)
+        self.assertEqual(near[0]["name"], "Sinus Medii")
+        self.assertLess(near[0]["sep_km"], 220.0)
+
+
+class TestLunarTexture(unittest.TestCase):
+    """Rendering the Moon from Stellarium's albedo map."""
+
+    SITE = (41.0082, 28.9784)
+    T = "2026-07-28T20:45:00"
+
+    def setUp(self):
+        from imu_fusion.lunar_texture import find_texture
+        if find_texture() is None:
+            self.skipTest("Stellarium's lunar albedo map is not installed")
+
+    def test_sky_rotation_sign_against_3_vectors(self):
+        """The in-image angle of the Moon's pole is P - q, not P + q.
+
+        Both are position angles from celestial north through east, and east is
+        counter-clockwise in an un-mirrored photograph, so the two subtract.  The
+        plus sign is the natural-looking mistake and it drifts by 2q -- up to
+        ~90 deg across a night -- which then hides inside a bogus camera roll.
+        Rather than trust the algebra, this computes the pole's image angle from
+        3-vectors (object, celestial north, east, zenith) and compares.
+        """
+        import numpy as np
+        from imu_fusion.astro import body_gp, gp_dec_gha
+        from imu_fusion.stellarium_source import gast_deg, _parse_dt
+        from imu_fusion.lunar_geometry import geocentric_libration
+        from imu_fusion.lunar_texture import sky_rotation
+        lat, lon = self.SITE
+        for iso in ("2026-07-28T18:00:00", "2026-07-28T21:00:00",
+                    "2026-07-28T23:00:00"):
+            dec, gha = gp_dec_gha(body_gp("Moon", iso))
+            dt = _parse_dt(iso)
+            ra = (gast_deg(dt) - gha) % 360.0
+            a, d = math.radians(ra), math.radians(dec)
+            o = np.array([math.cos(d) * math.cos(a), math.cos(d) * math.sin(a),
+                          math.sin(d)])
+            n = np.array([-math.sin(d) * math.cos(a), -math.sin(d) * math.sin(a),
+                          math.cos(d)])
+            e = np.array([-math.sin(a), math.cos(a), 0.0])
+            th = math.radians((gast_deg(dt) + lon) % 360.0)
+            ph = math.radians(lat)
+            z = np.array([math.cos(ph) * math.cos(th), math.cos(ph) * math.sin(th),
+                          math.sin(ph)])
+            up = z - (z @ o) * o
+            up = up / np.linalg.norm(up)
+            right = np.cross(o, up)
+            P = geocentric_libration(iso)["pole_pa"]
+            pole = n * math.cos(math.radians(P)) + e * math.sin(math.radians(P))
+            direct = math.degrees(math.atan2(-(pole @ right), pole @ up))
+            self.assertAlmostEqual(sky_rotation(iso, lat, lon), direct, delta=0.02)
+
+    def test_render_rotation_matches_an_image_rotation(self):
+        """render(rotation_deg=A) must equal _rotate(render(0), -A).
+
+        The two live in different modules with opposite sign conventions, and
+        the photograph matcher converts between them; if that mapping drifts,
+        every recovered rotation silently flips sign.
+        """
+        import numpy as np
+        from imu_fusion.lunar_texture import render
+        from imu_fusion.lunar_orientation import _rotate
+        a, _ = render(size=180, libration=(3.0, -4.0), subsolar=(10.0, 1.0),
+                      rotation_deg=25.0)
+        b, _ = render(size=180, libration=(3.0, -4.0), subsolar=(10.0, 1.0),
+                      rotation_deg=0.0)
+        m = np.hypot(*(np.mgrid[0:180, 0:180] - 89.5)) < 70
+
+        def miss(sign):
+            c = _rotate(b, sign * 25.0, 89.5, 89.5)
+            return float(np.sqrt(((a - c)[m] ** 2).mean()))
+
+        # Asserted as a RATIO, not against an absolute threshold: `_rotate`
+        # resamples bilinearly, so even the correct sign leaves a real residual
+        # (blur, ~20% of the signal here).  Only the comparison between the two
+        # signs isolates the convention from the interpolation.
+        self.assertLess(miss(-1), 0.4 * miss(+1))
+        self.assertLess(miss(-1), 0.3 * b[m].std())
+
+    def test_render_on_grid_agrees_with_render(self):
+        """The fractional-centre renderer must reproduce the square one exactly
+        on the grid where they overlap -- it is the only reason the tie-point
+        residuals can be smaller than the half pixel that pasting would cost."""
+        import numpy as np
+        from imu_fusion.lunar_texture import render, render_on_grid
+        n = 160
+        a, (cx, cy, r) = render(size=n, libration=(2.0, 3.0),
+                                subsolar=(8.0, 0.5), rotation_deg=11.0)
+        yy, xx = np.mgrid[0:n, 0:n].astype(float)
+        b = render_on_grid(xx, yy, cx, cy, r, libration=(2.0, 3.0),
+                           subsolar=(8.0, 0.5), rotation_deg=11.0)
+        self.assertLess(np.abs(a - b).max(), 1e-9)
+
+    def test_terminator_follows_the_subsolar_point(self):
+        """Near full Moon the unlit lune must be thin and lie OPPOSITE the Sun.
+
+        Rendering the disk and asking which side is dark is a check on the
+        illumination geometry that no amount of staring at a number gives.
+        """
+        import numpy as np
+        from imu_fusion.lunar_texture import render
+        img, (cx, cy, r) = render(size=201, libration=(0.0, 0.0),
+                                  subsolar=(6.0, 0.0), rotation_deg=0.0)
+        yy, xx = np.mgrid[0:201, 0:201].astype(float)
+        inside = ((xx - cx) ** 2 + (yy - cy) ** 2) < (0.995 * r) ** 2
+        dark = inside & (img <= 0.0)
+        # the Sun is at +6 deg selenographic longitude, i.e. toward +x, so the
+        # unlit sliver must sit at -x, and must be a sliver
+        self.assertGreater(dark.sum(), 0)
+        self.assertLess(dark.sum() / inside.sum(), 0.05)
+        self.assertLess(xx[dark].mean(), cx)
+
+
+class TestLunarMatch(unittest.TestCase):
+    """Fitting the disk geometry to an image."""
+
+    def setUp(self):
+        from imu_fusion.lunar_texture import find_texture
+        if find_texture() is None:
+            self.skipTest("Stellarium's lunar albedo map is not installed")
+
+    def test_recovers_a_synthetic_geometry(self):
+        """Render a Moon at a known centre, radius, rotation and libration, then
+        make the pipeline find them back.
+
+        This is the end-to-end guard on the offset SIGN in `tie_points`.  With
+        the sign flipped the residuals stay small -- the six-parameter model
+        simply absorbs the error into the disk centre, which is 0.96 correlated
+        with the libration -- so only a case with a KNOWN answer catches it.  On
+        the real photograph the same bug made the solve/re-render loop divergent,
+        doubling the libration error every round.
+        """
+        import numpy as np
+        from imu_fusion.lunar_texture import render_on_grid
+        from imu_fusion.lunar_match import tie_points, fit_geometry
+
+        true = dict(cx=612.4, cy=497.8, r=300.0, rot=7.5, lon=-2.4, lat=4.6)
+        sun = (5.7, 0.7)
+        yy, xx = np.mgrid[0:1000, 0:1200].astype(float)
+        img = render_on_grid(xx, yy, true["cx"], true["cy"], true["r"],
+                             libration=(true["lon"], true["lat"]), subsolar=sun,
+                             rotation_deg=true["rot"])
+
+        # start deliberately wrong: 6 px off centre, 1.5 deg off in libration
+        guess = (true["cx"] + 6.0, true["cy"] - 6.0, true["r"] + 2.0,
+                 true["rot"] + 1.0, true["lon"] + 1.5, true["lat"] - 1.5)
+        p = np.array(guess, float)
+        for _ in range(4):
+            ties = tie_points(img, p[0], p[1], p[2], (p[4], p[5]), sun, p[3],
+                              search=16)
+            self.assertGreaterEqual(len(ties), 8)
+            p = fit_geometry(ties, p)["params"]
+        self.assertAlmostEqual(p[0], true["cx"], delta=0.5)
+        self.assertAlmostEqual(p[1], true["cy"], delta=0.5)
+        self.assertAlmostEqual(p[2], true["r"], delta=0.5)
+        self.assertAlmostEqual(p[3], true["rot"], delta=0.1)
+        self.assertAlmostEqual(p[4], true["lon"], delta=0.15)
+        self.assertAlmostEqual(p[5], true["lat"], delta=0.15)
+
+    def test_libration_is_nearly_degenerate_with_the_disk_centre(self):
+        """Document the geometry that makes this hard.
+
+        A small libration rotates the sphere about a diameter, which to first
+        order just TRANSLATES the near-side pattern -- exactly what moving the
+        disk centre does.  The two are ~0.96 correlated, which is why the disk
+        centre cannot be left free and unconstrained, and why an error in one
+        shows up almost entirely as an error in the other.  If this correlation
+        ever drops, the geometry assumptions have changed and the surrounding
+        cautions need revisiting.
+        """
+        import numpy as np
+        from imu_fusion.lunar_texture import render_on_grid
+        from imu_fusion.lunar_match import tie_points, fit_geometry, project
+
+        cx, cy, r, rot, lo, la = 612.4, 497.8, 300.0, 7.5, -2.4, 4.6
+        sun = (5.7, 0.7)
+        yy, xx = np.mgrid[0:1000, 0:1200].astype(float)
+        img = render_on_grid(xx, yy, cx, cy, r, libration=(lo, la),
+                             subsolar=sun, rotation_deg=rot)
+        ties = tie_points(img, cx, cy, r, (lo, la), sun, rot)
+        p = fit_geometry(ties, (cx, cy, r, rot, lo, la))["params"]
+
+        obs = np.array([[t["x"], t["y"]] for t in ties])
+        sel = np.array([[t["lon"], t["lat"]] for t in ties])
+
+        def resid(q):
+            out = np.empty(2 * len(sel))
+            for k, (a, b) in enumerate(sel):
+                x, y, _ = project(a, b, (q[4], q[5]), q[3], q[0], q[1], q[2])
+                out[2 * k], out[2 * k + 1] = x - obs[k, 0], y - obs[k, 1]
+            return out
+
+        r0 = resid(p)
+        J = np.empty((len(r0), 6))
+        for k in range(6):
+            q = p.copy(); q[k] += 1e-3
+            J[:, k] = (resid(q) - r0) / 1e-3
+        C = np.linalg.inv(J.T @ J)
+        d = np.sqrt(np.diag(C))
+        corr = C / np.outer(d, d)
+        self.assertGreater(abs(corr[0, 4]), 0.9)     # cx  vs libration longitude
+        self.assertGreater(abs(corr[1, 5]), 0.9)     # cy  vs libration latitude
 
 
 if __name__ == "__main__":
