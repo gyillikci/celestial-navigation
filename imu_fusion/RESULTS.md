@@ -14,7 +14,7 @@
 
 5. **The tele lens is more than a pointer.** Resolving the disk gives a magnetometer-free heading, but the two bodies are not equal: the **Sun's** sharp disk yields ~0.1° (vs ~1° for the phone compass), while the **Moon's bright limb** is only ~1.9° (phase-limited, and degenerate near full) — *looser than the magnetometer*. So in daytime the heading should come from the Sun; the Moon's limb is a night / Sun-occluded backup. And the **difference** of the two disks' orientations gives a genuinely horizon-free position line (Δq, roll cancels); on a weak (IMU) horizon at sea the optical stack cuts the fix from 29 km to 8 km.
 
-6. **Geometry matters:** the fix is well-conditioned only when the Sun and Moon are well separated in azimuth (~90° here, a first-quarter Moon); near-parallel lines of position degrade it.
+6. **Geometry matters:** the fix is well-conditioned only when the Sun and Moon are well separated in azimuth (~90° here; the Moon is a waxing crescent, elongation 73°, 35% lit); near-parallel lines of position degrade it.
 
 ## Position error budget — and the Sun–Moon elongation
 

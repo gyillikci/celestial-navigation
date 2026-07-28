@@ -93,7 +93,8 @@ marginalised into the celestial factor covariances.
 
 ## Headline results
 
-Canonical epoch: **2026-03-24 12:00 UTC near Greenwich**, first-quarter Moon,
+Canonical epoch: **2026-03-24 12:00 UTC near Greenwich**, waxing crescent Moon
+(elongation 73°, 35% lit),
 Sun and Moon ~94° apart in azimuth (a well-conditioned fix). RMS horizontal
 position error, mean over 8 seeds — see [`RESULTS.md`](RESULTS.md) for the full
 tables and figures.

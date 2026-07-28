@@ -119,13 +119,36 @@ class TestImuFusion(unittest.TestCase):
         from imu_fusion.astro import body_gp
         t = "2026-03-24 12:00:00"
         k = moon_illuminated_fraction(t)
-        self.assertTrue(0.4 < k < 0.9)                 # waxing gibbous
+        # elongation ~73 deg at this epoch -> a waxing crescent approaching first
+        # quarter, k ~ 0.35.  (This assertion previously read 0.4 < k < 0.9 and
+        # called it gibbous, which encoded an inverted phase formula.)
+        self.assertTrue(0.25 < k < 0.50, f"illuminated fraction {k:.3f}")
         self.assertTrue(moon_limb_available(t))
         self.assertTrue(0.0 <= bright_limb_pa_deg(t) < 360.0)
         gm = body_gp("Moon", t)
         q1 = parallactic_angle_deg(50.0, 0.0, gm)
         q2 = parallactic_angle_deg(52.0, 0.0, gm)
         self.assertGreater(abs(q1 - q2), 1.0)          # q tracks latitude
+
+    def test_illuminated_fraction_endpoints(self):
+        ''' REGRESSION GUARD.  The phase formula must give NEW at conjunction and
+            FULL at opposition.  It was inverted -- (1+cos E)/2 -- until a
+            full-Moon photograph at elongation 170 deg contradicted it (the code
+            predicted a 0.7% crescent for an obviously round, fully lit disk). '''
+        from math import cos, radians
+        from imu_fusion.optical_attitude import moon_illuminated_fraction
+
+        def k_of(E):                      # the formula, isolated from the ephemeris
+            return (1.0 - cos(radians(E))) / 2.0
+        self.assertAlmostEqual(k_of(0.0), 0.0, places=9)     # new
+        self.assertAlmostEqual(k_of(90.0), 0.5, places=9)    # quarter
+        self.assertAlmostEqual(k_of(180.0), 1.0, places=9)   # full
+        # and the shipped function must agree with it at a real epoch
+        from imu_fusion.optical_attitude import moon_elongation_deg
+        t = "2026-07-28 19:00:00"                            # the photographed full Moon
+        self.assertAlmostEqual(moon_illuminated_fraction(t),
+                               k_of(moon_elongation_deg(t)), places=9)
+        self.assertGreater(moon_illuminated_fraction(t), 0.95)
 
     def test_optical_heading_beats_magnetometer(self):
         ''' The optical disk heading is tighter than the phone magnetometer. '''

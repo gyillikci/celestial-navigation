@@ -70,8 +70,24 @@ def moon_elongation_deg(time_iso: str) -> float:
 
 
 def moon_illuminated_fraction(time_iso: str) -> float:
-    ''' Fraction of the Moon's disk that is lit (0..1). '''
-    return (1.0 + cos(radians(moon_elongation_deg(time_iso)))) / 2.0
+    ''' Fraction of the Moon's disk that is lit (0..1).
+
+        k = (1 + cos i) / 2 with i the PHASE ANGLE (Sun-Moon-Earth), and
+        i = 180 deg - E for elongation E, so in terms of elongation
+
+            k = (1 - cos E) / 2
+
+        Check the ends: E = 180 deg is opposition, i.e. FULL (k = 1);
+        E = 0 is conjunction, i.e. NEW (k = 0).
+
+        This was inverted -- (1 + cos E)/2 -- until a full-Moon photograph taken
+        on 2026-07-28 at elongation 170 deg was measured against it: the code
+        predicted a 0.7% crescent for a disk that is plainly round and lit all
+        the way around.  Note that the phase-wedge sigma models elsewhere in this
+        module depend on k only through k(1-k), which is symmetric under
+        k -> 1-k, so those results were unaffected by the error.
+    '''
+    return (1.0 - cos(radians(moon_elongation_deg(time_iso)))) / 2.0
 
 
 def bright_limb_pa_deg(time_iso: str) -> float:
