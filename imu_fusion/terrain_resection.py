@@ -119,9 +119,66 @@ class DemTiles:
         return out
 
 
+def tile_name(lat: float, lon: float) -> str:
+    ''' SRTM tile filename covering a coordinate, e.g. 37.03,27.36 -> N37E027. '''
+    la, lo = int(np.floor(lat)), int(np.floor(lon))
+    return (f"{'N' if la >= 0 else 'S'}{abs(la):02d}"
+            f"{'E' if lo >= 0 else 'W'}{abs(lo):03d}")
+
+
+def fetch_tiles(lat_min: float, lat_max: float, lon_min: float, lon_max: float,
+                directory: str = None, base_url: str = None, quiet: bool = False):
+    ''' Download the 1-arc-second SRTM tiles covering a bounding box.
+
+        Tiles come from the public AWS "elevation-tiles-prod" skadi mirror and
+        are ~25 MB each (gzipped ~6 MB), so they are NOT committed -- fetch the
+        ones your area needs:
+
+            from imu_fusion.terrain_resection import fetch_tiles
+            fetch_tiles(36.9, 37.2, 27.1, 27.6)      # the Bodrum peninsula
+
+        Returns the list of local .hgt paths that now exist.  Already-present
+        tiles are skipped, and a tile that cannot be fetched is reported and
+        skipped rather than raising (the reader treats absent data as sea level).
+    '''
+    import gzip
+    import urllib.request
+
+    directory = directory or DemTiles().directory
+    base_url = base_url or "https://s3.amazonaws.com/elevation-tiles-prod/skadi"
+    os.makedirs(directory, exist_ok=True)
+    got = []
+    for la in range(int(np.floor(lat_min)), int(np.floor(lat_max)) + 1):
+        for lo in range(int(np.floor(lon_min)), int(np.floor(lon_max)) + 1):
+            name = tile_name(la + 0.5, lo + 0.5)
+            path = os.path.join(directory, name + ".hgt")
+            if os.path.exists(path):
+                got.append(path)
+                continue
+            url = f"{base_url}/{name[:3]}/{name}.hgt.gz"
+            try:
+                with urllib.request.urlopen(url, timeout=180) as r:
+                    data = gzip.decompress(r.read())
+                with open(path, "wb") as f:
+                    f.write(data)
+                got.append(path)
+                if not quiet:
+                    print(f"fetched {name} ({len(data) // (1 << 20)} MB)")
+            except Exception as exc:                      # pragma: no cover
+                if not quiet:
+                    print(f"could not fetch {name}: {exc}")
+    return got
+
+
 class SyntheticDem:
     ''' Analytic stand-in for `DemTiles`: a sum of Gaussian hills.  Used by the
-        tests so the resection logic is exercised without downloading tiles. '''
+        tests so the resection logic is exercised without downloading tiles.
+
+        NOTE: Gaussian hills are much smoother than real rocky terrain and give
+        an OPTIMISTIC picture — on real SRTM data over the Bodrum peninsula the
+        same experiment gives a ~2.5x larger median error (362 m vs 141 m) and a
+        ~20% outright failure rate.  Use `DemTiles` + `fetch_tiles` for any
+        accuracy claim. '''
 
     def __init__(self, hills):
         # hills: iterable of (lat, lon, height_m, sigma_deg)
@@ -355,6 +412,20 @@ def resect_with_priors(dem, obs: SkylineObservation, rough_lat: float,
         an IDENTIFIER, not the final estimator: use it to decide which DEM
         summits were photographed, then hand those to `terrain_factors` for a
         continuous least-squares fix with a covariance.
+
+        ON REAL TERRAIN (SRTM, Bodrum peninsula, 24 viewpoints, exact synthetic
+        observations, 200 m grid) it is markedly harder than smooth synthetic
+        hills: 5 of 24 produced no match at all, and of the 19 that matched the
+        median error was 362 m.
+
+        THE ELEVATION RESIDUAL IS A SELF-ASSESSMENT.  `elev_resid_px` correlates
+        with the true error (r = +0.58) and makes a usable accept/reject gate:
+
+            elev_resid <  3 px   n= 6   median  80 m   max 279 m
+            elev_resid >= 3 px   n=13   median 519 m
+
+        So gate on it -- report a fix when the residual is small and decline
+        when it is not, rather than always returning rank 1.
     '''
     render_kw = dict(render_kw or {})
     peak_kw = peak_kw or {}

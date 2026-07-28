@@ -23,3 +23,8 @@ validation/venv
 
 
 
+
+# DEM tiles (large, fetched on demand -- see imu_fusion/terrain_resection.py)
+*.hgt
+*.hgt.gz
+imu_fusion/dem/

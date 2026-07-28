@@ -1360,5 +1360,88 @@ class TestSyntheticSkyline(unittest.TestCase):
         self.assertLess(fix["sigma_km"], 2.0)
 
 
+def _dem_available():
+    try:
+        from imu_fusion.terrain_resection import DemTiles
+        return DemTiles().available()
+    except Exception:                                # pragma: no cover
+        return False
+
+
+@unittest.skipUnless(_HAVE and _dem_available(),
+                     "SRTM tiles absent — fetch with "
+                     "imu_fusion.terrain_resection.fetch_tiles(36.9,37.2,27.1,27.6)")
+class TestRealTerrainResection(unittest.TestCase):
+    ''' The same resection experiment on REAL SRTM terrain rather than smooth
+        synthetic hills.  Skipped unless tiles have been fetched. '''
+
+    RENDER = dict(az_step=0.1, d_step_km=0.08, d_max_km=40.0)
+    PEAKS = dict(window=20, min_prominence=0.10)
+
+    def _dem(self):
+        from imu_fusion.terrain_resection import DemTiles
+        return DemTiles()
+
+    def test_tile_name_mapping(self):
+        from imu_fusion.terrain_resection import tile_name
+        self.assertEqual(tile_name(37.03, 27.36), "N37E027")
+        self.assertEqual(tile_name(-1.2, -0.5), "S02W001")
+
+    def test_real_terrain_viewpoint_is_recovered(self):
+        ''' A viewpoint on the real Bodrum peninsula, observed exactly, must be
+            recovered to within a few grid cells. '''
+        from imu_fusion.terrain_resection import (synth_skyline_observation,
+                                                  resect_with_priors)
+        from imu_fusion.astro import great_circle_km
+        dem = self._dem()
+        lat, lon, az = 37.0450, 27.3900, 190.0        # Konacik-ish, 38 m
+        obs, truth = synth_skyline_observation(
+            dem, lat, lon, az, 120.0, width_px=2400,
+            render_kw=self.RENDER, peak_kw=self.PEAKS)
+        self.assertIsNotNone(obs)
+        self.assertGreaterEqual(len(obs), 5)
+        ranked = resect_with_priors(
+            dem, obs, lat + 0.004, lon - 0.003, prior_radius_km=0.4,
+            grid_step_m=200.0, mag_heading_deg=az + 1.0, mag_sigma_deg=2.0,
+            f_px_per_deg=truth["f_px_per_deg"],
+            render_kw=self.RENDER, peak_kw=self.PEAKS)
+        self.assertTrue(ranked, "no candidate matched on real terrain")
+        err_m = great_circle_km(lat, lon, ranked[0]["lat"],
+                                ranked[0]["lon"]) * 1000.0
+        self.assertLess(err_m, 600.0, f"rank-1 {err_m:.0f} m off on real terrain")
+
+    def test_elevation_residual_flags_a_bad_fix(self):
+        ''' The elevation residual must be small when the hypothesis is right
+            and large when it is wrong — that is what makes it usable as an
+            accept/reject gate (r = +0.58 with true error over 19 viewpoints). '''
+        from imu_fusion.terrain_resection import (synth_skyline_observation,
+                                                  render_skyline, skyline_peaks,
+                                                  score_match)
+        dem = self._dem()
+        lat, lon, az = 37.0450, 27.3900, 190.0
+        obs, truth = synth_skyline_observation(
+            dem, lat, lon, az, 120.0, width_px=2400,
+            render_kw=self.RENDER, peak_kw=self.PEAKS)
+        f = truth["f_px_per_deg"]
+
+        import numpy as _np
+        # az0 is the bearing of the observation's MEAN x column, not the frame
+        # centre — the summits are not symmetric about the boresight.
+        az0 = az + float(obs.x.mean()) / f
+
+        def resid_at(plat, plon):
+            g = float(dem.elevation(_np.array([plat]), _np.array([plon]))[0])
+            azs, prof = render_skyline(dem, plat, plon, g + 2.0, **self.RENDER)
+            pk = skyline_peaks(azs, prof, **self.PEAKS)
+            m = score_match(obs, azs, prof, pk, f, az0 % 360.0, 1)
+            return m["elev_resid_px"] if m else float("inf")
+
+        good = resid_at(lat, lon)                       # truth
+        bad = resid_at(lat + 0.030, lon - 0.030)        # ~4 km away
+        self.assertLess(good, bad,
+                        f"residual failed to flag the wrong position "
+                        f"(truth {good:.2f} px vs decoy {bad:.2f} px)")
+
+
 if __name__ == "__main__":
     unittest.main()
