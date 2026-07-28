@@ -68,9 +68,21 @@ def _try_astropy():
         return None
 
 
+def _try_stellarium():
+    ''' Use a Stellarium export as the PRIMARY engine when one is present. '''
+    from . import stellarium_source as ss
+    table = ss.get_table()
+    if table is not None:
+        return ("stellarium", table)
+    return None
+
+
 def select_engine():
-    ''' Return (engine_name, handle) or (None, None) if no engine is available. '''
-    for probe in (_try_skyfield, _try_astropy):
+    ''' Return (engine_name, handle) or (None, None) if no engine is available.
+
+        Stellarium (a dropped-in export) takes precedence — it is the project's
+        authoritative source; astropy/skyfield are the automatic fallbacks. '''
+    for probe in (_try_stellarium, _try_skyfield, _try_astropy):
         got = probe()
         if got:
             return got
@@ -87,6 +99,9 @@ ENGINE, _HANDLE = select_engine()
 def reference_gha_dec(body: str, dt: datetime):
     ''' Apparent geographic position of `body` at UTC `dt`: (dec_deg, gha_deg)
         from the active independent engine. '''
+    if ENGINE == "stellarium":
+        dec, gha = _HANDLE.gp_dec_gha(body, dt)
+        return dec, gha
     if ENGINE == "skyfield":
         eph, ts = _HANDLE
         d = dt.astimezone(timezone.utc)
@@ -171,7 +186,13 @@ def summarise(out) -> str:
 
 
 def _gast_deg(dt: datetime) -> float:
-    ''' Greenwich apparent sidereal time (degrees) from the active engine. '''
+    ''' Greenwich apparent sidereal time (degrees).  Uses the engine-free IAU
+        formula for the Stellarium path (and whenever no engine is loaded), so
+        the Stellarium reference needs no astropy/skyfield; falls back to the
+        active engine's own sidereal time otherwise. '''
+    if ENGINE in ("stellarium", None):
+        from .stellarium_source import gast_deg
+        return gast_deg(dt)
     if ENGINE == "skyfield":
         _, ts = _HANDLE
         d = dt.astimezone(timezone.utc)

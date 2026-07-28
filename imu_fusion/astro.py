@@ -47,6 +47,18 @@ def clear_gp_cache() -> None:
     _GP_CACHE.clear()
 
 
+def _stellarium_gp(object_name: str, time_iso: str):
+    ''' GP from the Stellarium export if one is present and covers this body,
+        else None (so `body_gp` falls back to the starfix almanac). '''
+    from . import stellarium_source as ss
+    table = ss.get_table()
+    if table is None or not table.has_body(object_name):
+        return None
+    dt = ss._parse_dt(time_iso)
+    dec, gha = table.gp_dec_gha(object_name, dt)
+    return LatLonGeocentric(dec, -gha)
+
+
 def body_gp(object_name: str, time_iso: str) -> LatLonGeocentric:
     ''' Return the geographic position (sub-point) of a body at a UTC time.
 
@@ -56,6 +68,16 @@ def body_gp(object_name: str, time_iso: str) -> LatLonGeocentric:
     '''
     key = (object_name.lower(), time_iso)
     gp = _GP_CACHE.get(key)
+    if gp is not None:
+        return gp
+
+    # Authoritative source: a Stellarium export, when present, is primary.
+    # Falls back to the starfix almanac when no export has been dropped in.
+    gp = _stellarium_gp(object_name, time_iso)
+    if gp is not None:
+        _GP_CACHE[key] = gp
+        return gp
+
     if gp is None:
         dummy = Sight(object_name=object_name,
                       set_time=time_iso,
@@ -79,6 +101,14 @@ def body_distance_km(object_name: str, time_iso: str) -> float:
         the topocentric-parallax and semidiameter models in `corrections.py`; the
         device carries the equivalent value in its own ephemeris.
     '''
+    # Authoritative source: the Stellarium export's distance, when present.
+    from . import stellarium_source as ss
+    table = ss.get_table()
+    if table is not None and table.has_body(object_name):
+        d = table.distance_km(object_name, ss._parse_dt(time_iso))
+        if d is not None:
+            return d
+
     name = object_name.lower()
     if name == "moon":
         from starfix import get_mr_item, parse_angle_string, ObsTypes

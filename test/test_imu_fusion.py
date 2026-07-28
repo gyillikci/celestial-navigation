@@ -704,5 +704,92 @@ class TestCorrections(unittest.TestCase):
             self.assertAlmostEqual(back, r["geometricAltDeg"], places=5)
 
 
+try:
+    from imu_fusion import stellarium_source as _SS
+    _HAVE_SS = True
+except Exception:                               # pragma: no cover
+    _HAVE_SS = False
+
+
+@unittest.skipUnless(_HAVE_SS, "stellarium_source not importable")
+class TestStellariumSource(unittest.TestCase):
+    ''' Ingestion of a Stellarium export as the authoritative astronomical
+        source: the tolerant CSV loader, linear interpolation (with RA wrap), the
+        engine-free sidereal time, and the guarantee that with NO export present
+        the study transparently falls back to the starfix almanac. '''
+
+    _CSV = (
+        "#STELLARIUM_EXPORT v1\n"
+        "#SCHEMA (Moon @ ...): ra = ...\n"
+        "utc,body,ra_deg,dec_deg,dist_au,alt_deg,az_deg,elong_deg,phase,size_arcsec\n"
+        "2026-03-24T00:00:00,Moon,359.0,10.0,0.00250,,,,,\n"
+        "2026-03-24T01:00:00,Moon,1.0,11.0,0.00260,,,,,\n"   # RA wraps 359->1
+        "2026-03-24T00:00:00,Sun,100.0,-5.0,1.0,,,,,\n"
+        "2026-03-24T01:00:00,Sun,100.5,-4.8,1.0,,,,,\n"
+        "\n#END\n"
+    )
+
+    def _write(self, text):
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".csv"); os.close(fd)
+        with open(path, "w") as f:
+            f.write(text)
+        self.addCleanup(os.remove, path)
+        return path
+
+    def test_loader_skips_comments_and_optional_blanks(self):
+        rows = _SS.load_csv(self._write(self._CSV))
+        self.assertEqual(len(rows), 4)                      # 2 Moon + 2 Sun
+        moon = [r for r in rows if r["body"] == "moon"]
+        self.assertEqual(moon[0]["dist_au"], 0.0025)
+        self.assertIsNone(moon[0]["alt_deg"])               # blank optional -> None
+
+    def test_interpolation_and_ra_wrap(self):
+        table = _SS.Table(_SS.load_csv(self._write(self._CSV)))
+        from datetime import datetime, timezone
+        mid = datetime(2026, 3, 24, 0, 30, tzinfo=timezone.utc)
+        dec, gha = table.gp_dec_gha("Moon", mid)
+        self.assertAlmostEqual(dec, 10.5, places=6)         # 10 -> 11 midpoint
+        # RA 359 -> 1 must interpolate through 0 (=> 360), not backwards to 180.
+        gast = _SS.gast_deg(mid)
+        self.assertAlmostEqual(gha, (gast - 0.0) % 360.0, places=4)
+        dist = table.distance_km("Moon", mid)
+        self.assertAlmostEqual(dist, 0.00255 * 149_597_870.7, delta=1.0)
+
+    def test_interpolation_clamps_outside_range(self):
+        table = _SS.Table(_SS.load_csv(self._write(self._CSV)))
+        from datetime import datetime, timezone
+        before = datetime(2026, 3, 23, tzinfo=timezone.utc)
+        dec, _ = table.gp_dec_gha("Moon", before)
+        self.assertAlmostEqual(dec, 10.0, places=6)         # clamped to first row
+
+    def test_gast_matches_astropy_where_available(self):
+        from datetime import datetime, timezone
+        try:
+            from astropy.time import Time
+        except Exception:
+            self.skipTest("astropy not available")
+        import warnings
+        worst = 0.0
+        for iso in ("2026-03-24 12:00:00", "2026-06-15 03:00:00"):
+            dt = datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                ap = Time(dt.replace(tzinfo=None), scale="utc").sidereal_time(
+                    "apparent", "greenwich").deg % 360.0
+            d = abs(((_SS.gast_deg(dt) - ap + 180) % 360) - 180) * 3600.0
+            worst = max(worst, d)
+        self.assertLess(worst, 2.0, f"engine-free GAST vs astropy {worst:.2f}\"")
+
+    def test_no_export_means_none_and_starfix_fallback(self):
+        # No stellarium_ephemeris.csv is shipped, so the authoritative table is
+        # absent and the study keeps using the starfix almanac unchanged.
+        _SS.clear_cache()
+        self.assertIsNone(_SS.get_table())
+        if _HAVE:
+            gp = body_gp("Moon", "2026-03-24 12:00:00")
+            self.assertTrue(-29 < gp.get_lat() < 29)        # sane Dec from starfix
+
+
 if __name__ == "__main__":
     unittest.main()

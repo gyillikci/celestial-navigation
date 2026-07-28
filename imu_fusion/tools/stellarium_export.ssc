@@ -1,0 +1,74 @@
+// stellarium_export.ssc — export Sun & Moon ephemeris from Stellarium as CSV.
+//
+// This makes Stellarium the AUTHORITATIVE astronomical source for the study and
+// the iOS app (see imu_fusion/stellarium_reference.md).  Run it inside
+// Stellarium on your Mac; it writes the rows to Stellarium's `output.txt`
+// (Script Console prints its path, e.g. ~/Library/Application Support/
+// Stellarium/output.txt).  Copy that file to imu_fusion/sample_data/
+// stellarium_ephemeris.csv and the Python side ingests it.
+//
+// The script is SELF-DESCRIBING: it first dumps the full getObjectInfo() field
+// map for the Moon (a "#SCHEMA" block) so the exact field names/units can be
+// verified, then writes the data rows.  If any column name below differs in your
+// Stellarium version, the schema block shows the real key — paste it back and the
+// loader is adjusted.
+//
+// Coordinates: RA/Dec are apparent, OF DATE, and (for RA/Dec) geocentric-
+// independent of the observer.  Distance is geocentric.  Altitude/azimuth are
+// topocentric for the observer set below and (atmosphere ON) apparent — used to
+// validate the refraction+parallax chain against Stellarium.
+//
+// (c) 2026.  MIT-licensed helper (this SCRIPT is ours; it only *drives*
+// Stellarium and copies out numbers — no Stellarium code is included).
+
+// ---- parameters (edit the window/step to taste) --------------------------
+var START_UTC = "2026-01-01T00:00:00";
+var END_UTC   = "2027-01-01T00:00:00";
+var STEP_HOURS = 1;    // HOURLY: the Moon moves ~0.5 deg/hr, so linear
+                       // interpolation needs an hourly grid to stay arcsec-good
+                       // (matches the nautical almanac's hourly cadence).  Narrow
+                       // the window rather than coarsen the step.
+var OBS_LAT = 0.0;      // observer for alt/az columns (RA/Dec are location-free)
+var OBS_LON = 0.0;
+var BODIES = ["Sun", "Moon"];
+// --------------------------------------------------------------------------
+
+function f(info, key) { return (key in info) ? ("" + info[key]) : ""; }
+
+core.output("#STELLARIUM_EXPORT v1");
+core.setObserverLocation(OBS_LON, OBS_LAT, 0, 0, "export", "Earth");
+core.setDate(START_UTC, "utc");
+var startJD = core.getJDay();
+core.setDate(END_UTC, "utc");
+var endJD = core.getJDay();
+var stepDays = STEP_HOURS / 24.0;
+
+// --- schema block: dump every field for the Moon at the start epoch ---
+core.setJDay(startJD);
+core.selectObjectByName("Moon", false);
+core.wait(0.05);
+var probe = core.getObjectInfo();
+core.output("#SCHEMA (Moon @ " + START_UTC + "):");
+for (var k in probe) { core.output("#  " + k + " = " + probe[k]); }
+
+// --- CSV header ---
+core.output("utc,body,ra_deg,dec_deg,dist_au,alt_deg,az_deg,elong_deg,phase,size_arcsec");
+
+// --- data rows ---
+for (var jd = startJD; jd <= endJD + 1e-9; jd += stepDays) {
+    core.setJDay(jd);
+    var utc = core.getDate("utc");
+    for (var b = 0; b < BODIES.length; b++) {
+        var name = BODIES[b];
+        core.selectObjectByName(name, false);
+        var i = core.getObjectInfo();
+        core.output(utc + "," + name + "," +
+                    f(i, "ra") + "," + f(i, "dec") + "," +
+                    f(i, "distance") + "," +
+                    f(i, "altitude") + "," + f(i, "azimuth") + "," +
+                    f(i, "elong") + "," + f(i, "phase") + "," +
+                    f(i, "size"));
+    }
+}
+core.output("#END");
+core.quitStellarium();
