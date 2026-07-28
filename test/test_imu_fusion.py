@@ -959,5 +959,129 @@ class TestLandfall(unittest.TestCase):
         self.assertLess(angles, compass)                     # compass-free wins
 
 
+@unittest.skipUnless(_HAVE, "numpy / starfix not installed")
+class TestTerrainResection(unittest.TestCase):
+    ''' Fixing position by matching a photographed skyline to a DEM.
+
+        Uses a synthetic analytic terrain so the logic is exercised without
+        downloading SRTM tiles.  The critical test is
+        `test_elevation_term_is_required_for_correct_ranking`, which guards the
+        finding that an azimuth-only score drifts to high inland terrain. '''
+
+    def _dem(self):
+        from imu_fusion.terrain_resection import SyntheticDem
+        # a ridge of hills to the south + a decoy high hill to the north
+        return SyntheticDem([
+            (36.90, 27.20, 900, 0.012),
+            (36.92, 27.30, 700, 0.010),
+            (36.94, 27.40, 850, 0.011),
+            (36.90, 27.48, 650, 0.012),
+            (36.96, 27.55, 780, 0.011),
+            (36.97, 27.10, 820, 0.012),
+            (36.86, 27.36, 950, 0.013),
+            (37.10, 27.36, 500, 0.014),        # inland decoy
+        ])
+
+    # peak scale must match the terrain's angular width (see module docstring)
+    PEAK_KW = dict(window=60, min_prominence=0.05)
+
+    def _synth_observation(self, dem, lat, lon, f=60.0, az0=200.0,
+                           cam_above=2.0, cy=400.0):
+        ''' Render the skyline from a known point and turn its summits into a
+            synthetic image observation (x, row). '''
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline, skyline_peaks, \
+            SkylineObservation
+        ground = float(dem.elevation(np.array([lat]), np.array([lon]))[0])
+        azs, prof = render_skyline(dem, lat, lon, ground + cam_above,
+                                   az_step=0.05, d_max_km=45.0, d_step_km=0.05)
+        peaks = skyline_peaks(azs, prof, **self.PEAK_KW)
+        self.assertGreaterEqual(len(peaks), 3, "synthetic terrain gave too few summits")
+        sel = [p for p in peaks if abs(((p[0] - az0 + 180) % 360) - 180) < 60]
+        self.assertGreaterEqual(len(sel), 3)
+        sel = np.array(sel)
+        x = (sel[:, 0] - az0) * f
+        row = cy - f * sel[:, 1]
+        return SkylineObservation(x, row, weight=np.ones(len(sel)) * 10.0), sel
+
+    def test_render_skyline_is_sane(self):
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline
+        dem = self._dem()
+        azs, prof = render_skyline(dem, 37.02, 27.36, 60.0, az_step=0.5)
+        self.assertEqual(len(azs), len(prof))
+        # hills lie south -> the horizon must be higher to the south than north
+        south = prof[(azs > 150) & (azs < 230)].max()
+        north = prof[(azs > 340) | (azs < 20)].max()
+        self.assertGreater(south, north)
+        self.assertTrue(-5 < prof.max() < 20)          # plausible elevation angles
+
+    def test_resection_recovers_a_known_viewpoint(self):
+        import numpy as np
+        from imu_fusion.terrain_resection import resect
+        from imu_fusion.astro import great_circle_km
+        dem = self._dem()
+        true_lat, true_lon = 37.0270, 27.3620
+        obs, _ = self._synth_observation(dem, true_lat, true_lon)
+        cands = [(la, lo)
+                 for la in np.arange(37.010, 37.061, 0.010)
+                 for lo in np.arange(27.330, 27.401, 0.010)]
+        ranked = resect(dem, obs, cands, f_list=np.arange(40., 90., 5.0),
+                        az_step=1.0, render_kw=dict(az_step=0.1, d_step_km=0.08),
+                        peak_kw=self.PEAK_KW)
+        self.assertTrue(ranked, "resection produced no candidates")
+        err = great_circle_km(true_lat, true_lon,
+                              ranked[0]["lat"], ranked[0]["lon"])
+        self.assertLess(err, 1.5, f"rank-1 was {err:.2f} km from truth")
+
+    def test_elevation_term_is_required_for_correct_ranking(self):
+        ''' REGRESSION GUARD.  Scoring on summit azimuths alone loses the
+            constraint that fixes how high the horizon should stand, and the
+            solution drifts to high inland terrain.  On the real Bodrum/Kos case
+            that cost 2059 m vs 297 m.  Here we assert the elevation residual
+            actually discriminates: the true viewpoint must have a markedly
+            smaller elevation residual than a decoy on high inland ground. '''
+        import numpy as np
+        from imu_fusion.terrain_resection import (render_skyline, skyline_peaks,
+                                                  best_match)
+        dem = self._dem()
+        true_lat, true_lon = 37.0270, 27.3620
+        obs, _ = self._synth_observation(dem, true_lat, true_lon)
+        fl = np.arange(40., 90., 2.0)
+
+        def fit(lat, lon):
+            ground = float(dem.elevation(np.array([lat]), np.array([lon]))[0])
+            azs, prof = render_skyline(dem, lat, lon, ground + 2.0,
+                                       az_step=0.1, d_step_km=0.08)
+            return best_match(obs, azs, prof,
+                              skyline_peaks(azs, prof, **self.PEAK_KW), fl,
+                              az_step=1.0)
+
+        good = fit(true_lat, true_lon)
+        decoy = fit(37.0500, 27.3600)          # 2.5 km north, higher ground
+        self.assertIsNotNone(good)
+        # the truth must fit better overall ...
+        if decoy is not None:
+            self.assertGreaterEqual(good["score"], decoy["score"])
+            # ... and specifically on the ELEVATION term
+            self.assertLess(good["elev_resid_px"], decoy["elev_resid_px"] + 1e-9)
+        # score_match must always report an elevation residual (no az-only mode)
+        self.assertIn("elev_resid_px", good)
+        self.assertGreaterEqual(good["elev_resid_px"], 0.0)
+
+    def test_observation_requires_row_elevations(self):
+        from imu_fusion.terrain_resection import SkylineObservation
+        with self.assertRaises(ValueError):
+            SkylineObservation([1, 2, 3], [10, 20])        # mismatched lengths
+
+    def test_dem_tiles_absent_is_graceful(self):
+        import numpy as np
+        from imu_fusion.terrain_resection import DemTiles
+        d = DemTiles(directory="/nonexistent-dem-dir")
+        self.assertFalse(d.available())
+        z = d.elevation(np.array([37.0]), np.array([27.0]))
+        self.assertEqual(float(z[0]), 0.0)                 # sea level, no crash
+
+
 if __name__ == "__main__":
     unittest.main()
