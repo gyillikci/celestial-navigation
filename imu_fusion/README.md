@@ -161,3 +161,6 @@ on the Neural Engine/GPU and is out of scope here.
   natural on-device seam already exists in the repo:
   `az_calc.get_latlon_for_solar_obs(azimuth, altitude, timestamp)` and the
   `Sight(object_name, set_time, measured_alt, …)` constructor.
+  [`ios_app_architecture.md`](ios_app_architecture.md) maps every validated module
+  onto a concrete iPhone 17 Pro app (frameworks, capture/solver data flow, the
+  on-device calibration protocol for the tilt floor, Xcode layout).
