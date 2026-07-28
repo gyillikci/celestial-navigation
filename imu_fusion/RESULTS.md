@@ -12,24 +12,9 @@
 
 4. **The ultrawide camera fixes the sea (and air) problem.** Shooting the ultrawide horizon at the same instant as the tele body gives an *optical* horizon that is immune to acceleration. It drops the sea fix from 27 km to **2.0 km** and the air fix from 9 km to **2.2 km** — bringing the moving platforms to land-class accuracy. On land there is no true sea horizon, so it falls back to the IMU (no change).
 
-5. **The tele lens is more than a pointer.** Resolving the disk gives a magnetometer-free heading, but the two bodies are not equal: the **Sun's** sharp disk yields ~0.1° (vs ~1° for the phone compass), while the **Moon's bright limb** is only ~1.9° (phase-limited, and degenerate near full) — *looser than the magnetometer*. So in daytime the heading should come from the Sun; the Moon's limb is a night / Sun-occluded backup. Either way the disk adds a horizon-free parallactic line; on a weak (IMU) horizon at sea the optical stack cuts the fix from 29 km to 2 km.
+5. **The tele lens is more than a pointer.** Resolving the disk gives a magnetometer-free heading, but the two bodies are not equal: the **Sun's** sharp disk yields ~0.1° (vs ~1° for the phone compass), while the **Moon's bright limb** is only ~1.9° (phase-limited, and degenerate near full) — *looser than the magnetometer*. So in daytime the heading should come from the Sun; the Moon's limb is a night / Sun-occluded backup. And the **difference** of the two disks' orientations gives a genuinely horizon-free position line (Δq, roll cancels); on a weak (IMU) horizon at sea the optical stack cuts the fix from 29 km to 8 km.
 
 6. **Geometry matters:** the fix is well-conditioned only when the Sun and Moon are well separated in azimuth (~90° here, a first-quarter Moon); near-parallel lines of position degrade it.
-
-## Ground-truth validation — are the Sun/Moon positions right?
-
-The whole study rests on the Sun/Moon positions from `starfix`'s almanac. Those are cross-checked here against an **independent** ephemeris (`astropy` — a separate implementation from the almanac's Skyfield/JPL source), over a 90-day grid. Residuals (arc-seconds):
-
-| Body | GHA rms / max | Dec rms / max | in km |
-|---|---|---|---|
-| Sun | 1.9″ / 3.8″ | 1.7″ / 3.0″ | ~0.07 km |
-| Moon | 4.0″ / 11.0″ | 2.4″ / 6.7″ | ~0.20 km |
-
-![groundtruth](results/fig_groundtruth.png)
-
-Both bodies agree to a **few arc-seconds** — far below the study's arc-minute measurement noise — confirming the ground truth. The residual floor is the almanac's 0.1′ table quantization plus hourly linear interpolation.
-
-> **This validation earned its keep.** The independent check first flagged a Moon-declination error of up to ~1.6° near the Dec≈0 crossings — a sign-handling bug in `starfix.parse_angle_string` for the almanac's `-00:MM.M` negative-zero-degree format (`float("-00")` is `-0.0`, and `-0.0 < 0` is `False`). It is now fixed; the Moon residual dropped from ~5700″ to a few arc-seconds. The study's canonical epoch (Moon at Dec +28°) was never affected. A **Stellarium** export can be added as a third witness — see `stellarium_reference.md`.
 
 ## Position error budget — and the Sun–Moon elongation
 
@@ -58,7 +43,8 @@ One graph fuses every observable at once. Per Sun+Moon shot there is a pose `X(i
 - **Altitude** of Sun and Moon — tele pointing measured against the horizon reference. *Position lines.*
 - **Horizon reference** = **IMU gravity** ⊕ **ultrawide optical horizon** (acceleration-immune, dip-corrected). *Sets the altitude covariance.*
 - **Azimuth** of Sun and Moon — usable because the **tele-disk orientation** (Moon bright limb, Sun sunspot P-angle) gives a **magnetometer-free heading**. *Position lines.*
-- **Parallactic angle q** of each body — the disk orientation vs. the vertical. *Independent, horizon-free position line.*
+- **Parallactic angle q** of each body — the disk orientation vs. the vertical. *A per-body position line, but it needs the horizon* (a single disk gives θ = PA − q − roll; q and roll don't separate without a vertical).
+- **Differential Δq (Sun−Moon)** — the difference of the two disks' orientations. The shared platform roll **cancels**, so this is the genuinely **horizon-free** position line. *Needs both disks resolved.*
 - **IMU preintegration** between shots (+ bias state). *Links the trajectory, smooths many fixes.*
 - **Least-rotation gating** — selects the calm shutter instants that feed the graph.
 - **Coarse position prior** (a stale ~30 km dead-reckoning). *Disambiguates; does not drive accuracy.*
@@ -67,19 +53,19 @@ Deployed accuracy of the **full fusion** (RMS km, 8 seeds):
 
 | Regime | full fusion |
 |---|---|
-| Land (stationary) | **2.0 ± 1.1** |
-| Sea (vessel + swell) | **1.7 ± 0.7** |
-| Air (aircraft) | **1.7 ± 0.7** |
+| Land (stationary) | **2.1 ± 0.9** |
+| Sea (vessel + swell) | **1.6 ± 0.8** |
+| Air (aircraft) | **1.7 ± 0.9** |
 
 ### What each observable is worth (leave-one-out)
 
 Starting from the full fusion and removing one observable at a time:
 
-| Regime | full fusion | - ultrawide horizon | - IMU link | - optical azimuth | - parallactic line | - gating | - Moon (Sun only) |
-|---|---|---|---|---|---|---|---|
-| Land (stationary) | 2.0 ± 1.1 | 2.0 ± 1.1 | 9.0 ± 1.3 | 2.4 ± 1.2 | 3.4 ± 2.2 | 1.8 ± 0.9 | 2.4 ± 1.1 |
-| Sea (vessel + swell) | 1.7 ± 0.7 | 1.9 ± 0.9 | 6.4 ± 0.8 | 1.6 ± 1.0 | 1.8 ± 0.9 | 2.7 ± 1.2 | 1.6 ± 0.7 |
-| Air (aircraft) | 1.7 ± 0.7 | 1.9 ± 1.2 | 6.4 ± 0.8 | 1.6 ± 1.1 | 2.0 ± 1.1 | 1.9 ± 0.9 | 1.6 ± 0.7 |
+| Regime | full fusion | - ultrawide horizon | - IMU link | - optical azimuth | - parallactic line | - Δq (Sun-Moon) | - gating | - Moon (Sun only) |
+|---|---|---|---|---|---|---|---|---|
+| Land (stationary) | 2.1 ± 0.9 | 2.1 ± 0.9 | 7.9 ± 1.2 | 3.0 ± 1.5 | 3.4 ± 2.2 | 3.0 ± 1.7 | 2.5 ± 0.3 | 2.5 ± 1.1 |
+| Sea (vessel + swell) | 1.6 ± 0.8 | 3.2 ± 1.2 | 5.5 ± 0.6 | 1.9 ± 0.9 | 1.8 ± 0.9 | 2.0 ± 0.9 | 4.0 ± 1.0 | 1.6 ± 0.8 |
+| Air (aircraft) | 1.7 ± 0.9 | 2.4 ± 1.1 | 5.5 ± 0.6 | 1.9 ± 0.9 | 2.0 ± 1.1 | 2.1 ± 1.1 | 1.9 ± 0.9 | 1.6 ± 0.7 |
 
 ![ablation](results/fig_ablation.png)
 
@@ -97,9 +83,9 @@ Per-fix latency at 30 shots (host CPU, single thread; an A19 Pro is comparable):
 
 | Regime | batch re-solve | **streaming update** | speedup | final-error parity (batch / stream) |
 |---|---|---|---|---|
-| Land (stationary) | 323 ms | **5.2 ms** | 63× | 1.34 / 1.36 km |
-| Sea (vessel + swell) | 298 ms | **5.0 ms** | 59× | 0.72 / 0.72 km |
-| Air (aircraft) | 293 ms | **4.9 ms** | 60× | 0.73 / 0.73 km |
+| Land (stationary) | 255 ms | **4.2 ms** | 60× | 1.72 / 2.38 km |
+| Sea (vessel + swell) | 232 ms | **3.5 ms** | 65× | 1.36 / 1.65 km |
+| Air (aircraft) | 229 ms | **3.5 ms** | 66× | 1.35 / 1.62 km |
 
 ![realtime](results/fig_realtime.png)
 
@@ -111,9 +97,9 @@ A clip-on afocal optic triples the tele focal length (sharper pointing, bigger d
 
 | Regime | 1× | 2× | 3× |
 |---|---|---|---|
-| Land (stationary) | 2.2 ± 1.3 | 2.2 ± 1.3 | 2.2 ± 1.3 |
-| Sea (vessel + swell) | 1.3 ± 0.8 | 1.3 ± 0.8 | 1.3 ± 0.8 |
-| Air (aircraft) | 1.4 ± 0.9 | 1.4 ± 0.9 | 1.4 ± 0.9 |
+| Land (stationary) | 2.4 ± 1.0 | 2.4 ± 1.0 | 2.4 ± 1.0 |
+| Sea (vessel + swell) | 1.4 ± 0.9 | 1.4 ± 0.9 | 1.4 ± 0.9 |
+| Air (aircraft) | 1.5 ± 0.9 | 1.5 ± 0.9 | 1.5 ± 0.9 |
 
 Why: the altitude error budget is dominated by the horizon (optical ~3.8′, IMU ~70′ at sea), while camera pointing is ~0.03′ — already ~100× smaller, and 3× zoom only shrinks that already-negligible term. Heading is floored by astronomical/model residuals (libration, seeing, P-angle) that zoom cannot improve.
 
@@ -131,8 +117,8 @@ So it is the reverse of *"wide lens for high hours"*: **the wide lens is the LOW
 
 | Regime | wide-only | ultrawide | adaptive |
 |---|---|---|---|
-| Sea (vessel + swell) | 4.2 ± 2.3 | 1.4 ± 0.6 | 1.4 ± 0.6 |
-| Air (aircraft) | 3.0 ± 1.4 | 1.4 ± 0.7 | 1.4 ± 0.7 |
+| Sea (vessel + swell) | 2.9 ± 1.4 | 1.5 ± 0.6 | 1.5 ± 0.6 |
+| Air (aircraft) | 2.6 ± 1.3 | 1.5 ± 0.6 | 1.5 ± 0.6 |
 
 Practical guidance: for this method prefer **moderate-to-low body altitudes (~15–30°)** — the wide lens then delivers the sharpest horizon and refraction is still manageable (below ~15° refraction/dip uncertainty grows; `starfix` models it). High-noon sights are the worst case for the optical horizon.
 
@@ -153,9 +139,9 @@ The gyro alone diverges (~0.17′/s); the accelerometer is bounded but wrecked b
 
 | Regime | optical horizon: no anchor / anchor | no optical horizon: no anchor / anchor |
 |---|---|---|
-| Land (stationary) | 2.2 ± 0.9 / **1.3 ± 0.5** | 2.2 ± 0.9 / **1.3 ± 0.5** |
-| Sea (vessel + swell) | 1.6 ± 0.5 / **1.2 ± 0.5** | 3.9 ± 1.4 / **1.3 ± 0.5** |
-| Air (aircraft) | 1.7 ± 0.6 / **1.2 ± 0.5** | 3.2 ± 1.0 / **1.3 ± 0.5** |
+| Land (stationary) | 2.1 ± 0.9 / **1.2 ± 0.4** | 2.1 ± 0.9 / **1.2 ± 0.4** |
+| Sea (vessel + swell) | 1.4 ± 0.5 / **1.1 ± 0.4** | 3.2 ± 1.9 / **1.3 ± 0.4** |
+| Air (aircraft) | 1.5 ± 0.6 / **1.1 ± 0.4** | 2.7 ± 0.6 / **1.2 ± 0.4** |
 
 ![anchor fix](results/fig_anchor_fix.png)
 
@@ -169,9 +155,9 @@ Cloud hits both the **sight** for that body (no line of position) and the **visu
 
 | Regime | 0% cloud | 15% cloud | 30% cloud | 45% cloud | 60% cloud | 75% cloud |
 |---|---|---|---|---|---|---|
-| Land (stationary) | 1.3 ± 0.5 | 1.4 ± 0.4 | 1.8 ± 0.7 | 2.1 ± 1.1 | 2.8 ± 1.9 | 3.2 ± 1.3 |
-| Sea (vessel + swell) | 1.2 ± 0.5 | 1.5 ± 0.3 | 1.6 ± 0.5 | 1.8 ± 1.1 | 2.4 ± 1.2 | 2.6 ± 1.4 |
-| Air (aircraft) | 1.2 ± 0.5 | 1.3 ± 0.4 | 1.5 ± 0.5 | 1.9 ± 1.0 | 1.7 ± 1.4 | 2.9 ± 2.1 |
+| Land (stationary) | 1.0 ± 0.5 | 1.6 ± 0.7 | 1.3 ± 0.5 | 1.6 ± 0.4 | 1.9 ± 1.5 | 3.1 ± 1.4 |
+| Sea (vessel + swell) | 0.9 ± 0.4 | 1.1 ± 0.5 | 1.2 ± 0.5 | 1.4 ± 0.6 | 1.4 ± 0.7 | 2.3 ± 1.4 |
+| Air (aircraft) | 0.9 ± 0.4 | 1.2 ± 0.4 | 1.3 ± 0.5 | 1.1 ± 0.5 | 1.9 ± 1.3 | 2.7 ± 2.0 |
 
 ![cloud](results/fig_cloud.png)
 
@@ -240,7 +226,7 @@ Resulting position error (factor graph + IMU, gated):
 
 ## 4. Tele-resolved disk: magnetometer-free heading + parallactic line
 
-The tele lens resolves the disk, not just a dot. The Moon's bright limb (and the Sun's sunspot P-angle) give an *absolute* celestial orientation in the image. Measured against the gravity vertical, it yields the parallactic angle *q(lat, lon)* — a heading reference that needs no magnetometer, and an independent, horizon-free position line.
+The tele lens resolves the disk, not just a dot. The Moon's bright limb (and the Sun's sunspot P-angle) give an *absolute* celestial orientation in the image, which yields the parallactic angle *q(lat, lon)* — a magnetometer-free heading and a position line. A single disk's *q* still needs a vertical (θ = PA − q − roll), but the **difference** of the two disks' orientations, **Δq(Sun−Moon)**, cancels the shared platform roll and so is a genuinely **horizon-free** position line (it needs both disks resolved).
 
 Heading sigma (degrees) — magnetometer vs. optical disk:
 
@@ -254,9 +240,9 @@ Position error (factor graph + IMU, gated, **IMU horizon** so the optical gain i
 
 | Regime | altitude only | + az (magnetometer) | + az (optical) | **+ optical az & parallactic** |
 |---|---|---|---|---|
-| Land (stationary) | 5.4 ± 0.8 | 3.6 ± 1.9 | 2.8 ± 1.9 | **1.8 ± 0.7** |
-| Sea (vessel + swell) | 28.6 ± 15.8 | 17.3 ± 11.0 | 14.7 ± 11.5 | **2.4 ± 1.3** |
-| Air (aircraft) | 12.0 ± 6.0 | 8.4 ± 5.4 | 6.3 ± 4.2 | **2.0 ± 1.0** |
+| Land (stationary) | 5.4 ± 0.8 | 3.6 ± 1.9 | 2.8 ± 1.9 | **2.0 ± 0.7** |
+| Sea (vessel + swell) | 28.6 ± 15.8 | 17.3 ± 11.0 | 14.7 ± 11.5 | **8.1 ± 3.2** |
+| Air (aircraft) | 12.0 ± 6.0 | 8.4 ± 5.4 | 6.3 ± 4.2 | **3.5 ± 1.9** |
 
 The optical disk gives a heading several times better than the magnetometer, which is what makes the azimuth lines of position usable; combined with the parallactic line it materially improves the fix when the horizon is weak (e.g. sea on the IMU horizon). The Sun's P-angle needs a solar filter and visible spots (matched to an observatory reference taken just before the journey), so the Moon's bright limb is the workhorse.
 
@@ -267,9 +253,9 @@ The optical disk gives a heading several times better than the magnetometer, whi
 
 | Regime | ultrawide horizon only | **full stack (horizon + optical)** |
 |---|---|---|
-| Land (stationary) | 5.2 ± 2.2 | **2.2 ± 0.7** |
-| Sea (vessel + swell) | 2.7 ± 1.2 | **1.4 ± 1.0** |
-| Air (aircraft) | 2.8 ± 1.2 | **1.4 ± 0.9** |
+| Land (stationary) | 5.2 ± 2.2 | **1.8 ± 0.9** |
+| Sea (vessel + swell) | 2.7 ± 1.2 | **1.4 ± 0.6** |
+| Air (aircraft) | 2.8 ± 1.2 | **1.4 ± 0.6** |
 
 ## 5. Error vs. number of fused shots
 

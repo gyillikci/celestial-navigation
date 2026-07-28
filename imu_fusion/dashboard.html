@@ -48,8 +48,8 @@ tele-disk orientation.</p>
 position.</figcaption></figure>
 <table><tr><th>Regime</th><th>full fusion</th>
 <th>− ultrawide</th><th>− IMU</th><th>− opt. az</th><th>− parallactic</th>
-<th>− gating</th><th>− Moon</th></tr>
-<tr><td>Land (stationary)</td><td class='hi'>2.0 ± 1.1</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>9.0 ± 1.3</td><td class='mono dim'>2.4 ± 1.2</td><td class='mono dim'>3.4 ± 2.2</td><td class='mono dim'>1.8 ± 0.9</td><td class='mono dim'>2.4 ± 1.1</td></tr><tr><td>Sea (vessel + swell)</td><td class='hi'>1.7 ± 0.7</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>6.4 ± 0.8</td><td class='mono dim'>1.6 ± 1.0</td><td class='mono dim'>1.8 ± 0.9</td><td class='mono dim'>2.7 ± 1.2</td><td class='mono dim'>1.6 ± 0.7</td></tr><tr><td>Air (aircraft)</td><td class='hi'>1.7 ± 0.7</td><td class='mono dim'>1.9 ± 1.2</td><td class='mono dim'>6.4 ± 0.8</td><td class='mono dim'>1.6 ± 1.1</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>1.6 ± 0.7</td></tr></table>
+<th>− Δq(☉−☾)</th><th>− gating</th><th>− Moon</th></tr>
+<tr><td>Land (stationary)</td><td class='hi'>2.1 ± 0.9</td><td class='mono dim'>2.1 ± 0.9</td><td class='mono dim'>7.9 ± 1.2</td><td class='mono dim'>3.0 ± 1.5</td><td class='mono dim'>3.4 ± 2.2</td><td class='mono dim'>3.0 ± 1.7</td><td class='mono dim'>2.5 ± 0.3</td><td class='mono dim'>2.5 ± 1.1</td></tr><tr><td>Sea (vessel + swell)</td><td class='hi'>1.6 ± 0.8</td><td class='mono dim'>3.2 ± 1.2</td><td class='mono dim'>5.5 ± 0.6</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>1.8 ± 0.9</td><td class='mono dim'>2.0 ± 0.9</td><td class='mono dim'>4.0 ± 1.0</td><td class='mono dim'>1.6 ± 0.8</td></tr><tr><td>Air (aircraft)</td><td class='hi'>1.7 ± 0.9</td><td class='mono dim'>2.4 ± 1.1</td><td class='mono dim'>5.5 ± 0.6</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>2.1 ± 1.1</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>1.6 ± 0.7</td></tr></table>
 <p class='note'>Leave-one-out: the first column is the full fusion; each other
 column removes one observable, so a bigger number is a more valuable observable.</p>
 <figure><img src='results/fig_ablation.png'><figcaption>What each observable is
@@ -65,7 +65,7 @@ bounded</b> — with the same current-position accuracy. Fixes are low-rate; IMU
 dead-reckoning covers the gaps.</p>
 <table><tr><th>Regime</th><th>batch @ 30 shots</th>
 <th>streaming update</th><th>speedup</th><th>final-error (batch / stream)</th></tr>
-<tr><td>Land (stationary)</td><td class='mono dim'>323 ms</td><td class='mono hi'>5.2 ms</td><td class='mono'>63×</td><td class='mono'>1.34 / 1.36 km</td></tr><tr><td>Sea (vessel + swell)</td><td class='mono dim'>298 ms</td><td class='mono hi'>5.0 ms</td><td class='mono'>59×</td><td class='mono'>0.72 / 0.72 km</td></tr><tr><td>Air (aircraft)</td><td class='mono dim'>293 ms</td><td class='mono hi'>4.9 ms</td><td class='mono'>60×</td><td class='mono'>0.73 / 0.73 km</td></tr></table>
+<tr><td>Land (stationary)</td><td class='mono dim'>255 ms</td><td class='mono hi'>4.2 ms</td><td class='mono'>60×</td><td class='mono'>1.72 / 2.38 km</td></tr><tr><td>Sea (vessel + swell)</td><td class='mono dim'>232 ms</td><td class='mono hi'>3.5 ms</td><td class='mono'>65×</td><td class='mono'>1.36 / 1.65 km</td></tr><tr><td>Air (aircraft)</td><td class='mono dim'>229 ms</td><td class='mono hi'>3.5 ms</td><td class='mono'>66×</td><td class='mono'>1.35 / 1.62 km</td></tr></table>
 <figure><img src='results/fig_realtime.png'><figcaption>Per-fix latency vs trip
 length: batch grows, streaming stays flat under the real-time budget.</figcaption></figure>
 </div>
@@ -85,22 +85,24 @@ back to the IMU.</p>
 <h2>The tele lens as an instrument, not a pointer</h2>
 <p>Resolving the disk gives an absolute celestial orientation: a
 <em>magnetometer-free heading</em> (which makes the azimuth lines of position
-usable) and a horizon-free <em>parallactic</em> position line. But the two bodies
-are not equal as a compass — the <b>Sun's</b> sharp disk is precise, while the
-<b>Moon's bright limb</b> is only ~2° (phase-limited, degenerate near full),
-looser than a magnetometer. In daytime, with both up, take the heading from the
-<b>Sun</b>; the Moon's limb is a night / Sun-occluded backup. Shown on the weak
-IMU horizon so the gain is visible.</p>
+usable) and a <em>parallactic</em> position line. A single disk's parallactic
+still needs a vertical (θ = PA − q − roll), so it is <em>not</em> horizon-free on
+its own; the genuinely horizon-free line is the <b>difference</b> of the two
+disks' orientations, <b>Δq(Sun−Moon)</b>, where the shared platform roll cancels.
+As a compass the bodies are unequal — the <b>Sun's</b> sharp disk is precise,
+the <b>Moon's bright limb</b> only ~2° (phase-limited, degenerate near full),
+looser than a magnetometer — so in daytime take the heading from the <b>Sun</b>.
+Shown on the weak IMU horizon so the gain is visible.</p>
 <table><tr><th>Regime</th><th>heading σ (mag / optical)</th><th>alt only</th>
 <th>+az (mag)</th><th>+az (optical)</th><th>+optical &amp; parallactic</th></tr>
-<tr><td>Land (stationary)</td><td>1.0° / 1.9°</td><td>5.4 ± 0.8</td><td>3.6 ± 1.9</td><td>2.8 ± 1.9</td><td class='hi'>1.8 ± 0.7</td></tr><tr><td>Sea (vessel + swell)</td><td>1.0° / 1.9°</td><td>28.6 ± 15.8</td><td>17.3 ± 11.0</td><td>14.7 ± 11.5</td><td class='hi'>2.4 ± 1.3</td></tr><tr><td>Air (aircraft)</td><td>1.0° / 1.9°</td><td>12.0 ± 6.0</td><td>8.4 ± 5.4</td><td>6.3 ± 4.2</td><td class='hi'>2.0 ± 1.0</td></tr></table>
+<tr><td>Land (stationary)</td><td>1.0° / 1.9°</td><td>5.4 ± 0.8</td><td>3.6 ± 1.9</td><td>2.8 ± 1.9</td><td class='hi'>2.0 ± 0.7</td></tr><tr><td>Sea (vessel + swell)</td><td>1.0° / 1.9°</td><td>28.6 ± 15.8</td><td>17.3 ± 11.0</td><td>14.7 ± 11.5</td><td class='hi'>8.1 ± 3.2</td></tr><tr><td>Air (aircraft)</td><td>1.0° / 1.9°</td><td>12.0 ± 6.0</td><td>8.4 ± 5.4</td><td>6.3 ± 4.2</td><td class='hi'>3.5 ± 1.9</td></tr></table>
 <p class="note"><b>These numbers use the weak IMU horizon on purpose</b>, to
 isolate the optical-disk contribution — not a regression versus the ~2&nbsp;km
 ultrawide horizon. Stacking <em>everything</em> (ultrawide horizon + optical
 disk, Moon&nbsp;+&nbsp;Sun) gives the deployed accuracy:</p>
 <table><tr><th>Regime</th><th>ultrawide horizon only</th>
 <th>full stack (horizon + optical)</th></tr>
-<tr><td>Land (stationary)</td><td>5.2 ± 2.2</td><td class='hi'>2.2 ± 0.7</td></tr><tr><td>Sea (vessel + swell)</td><td>2.7 ± 1.2</td><td class='hi'>1.4 ± 1.0</td></tr><tr><td>Air (aircraft)</td><td>2.8 ± 1.2</td><td class='hi'>1.4 ± 0.9</td></tr></table>
+<tr><td>Land (stationary)</td><td>5.2 ± 2.2</td><td class='hi'>1.8 ± 0.9</td></tr><tr><td>Sea (vessel + swell)</td><td>2.7 ± 1.2</td><td class='hi'>1.4 ± 0.6</td></tr><tr><td>Air (aircraft)</td><td>2.8 ± 1.2</td><td class='hi'>1.4 ± 0.6</td></tr></table>
 </div>
 
 <div class='card'>
@@ -156,27 +158,6 @@ overcast makes celestial unavailable, like any sextant.</p>
 with cloud cover; shot availability tracks the clear sky.</figcaption></figure>
 <figure><img src='results/fig_coast.png'><figcaption>Coast budget when both
 bodies are lost: sub-km for ~2 minutes, then dead-reckoning runs away.</figcaption></figure>
-</div>
-
-<div class='card'>
-<h2>Are the Sun/Moon positions right? Independent ground-truth check</h2>
-<p>Every fix rests on the Sun/Moon positions from <code>starfix</code>'s almanac.
-Those are cross-checked here against an <b>independent</b> ephemeris
-(<code>astropy</code> — a separate implementation from the almanac's
-Skyfield/JPL source) over a 90-day grid. Both bodies agree to a
-<b>few arc-seconds</b>, far below the study's arc-minute measurement noise.</p>
-<table><tr><th>Body</th><th>GHA rms / max</th><th>Dec rms / max</th><th>≈ position</th></tr>
-<tr><td>Sun</td><td class='mono'>1.9″ / 3.8″</td><td class='mono'>1.7″ / 3.0″</td><td class='mono dim'>~0.07 km</td></tr><tr><td>Moon</td><td class='mono'>4.0″ / 11.0″</td><td class='mono'>2.4″ / 6.7″</td><td class='mono dim'>~0.20 km</td></tr></table>
-<figure><img src='results/fig_groundtruth.png'><figcaption>GHA/Dec residual vs an
-independent ephemeris across 90 days — a few arc-seconds, set by the almanac's
-0.1′ quantization and hourly interpolation.</figcaption></figure>
-<p class='note'><b>This check earned its keep:</b> it first flagged a Moon-declination
-error up to ~1.6° near the Dec≈0 crossings — a sign bug in
-<code>starfix.parse_angle_string</code> for the <code>-00:MM.M</code> format
-(<code>float("-00")</code> is <code>-0.0</code>, and <code>-0.0&nbsp;&lt;&nbsp;0</code>
-is false). Now fixed; the canonical epoch (Moon at Dec&nbsp;+28°) was never affected.
-A <b>Stellarium</b> export can be dropped in as a third witness — see
-<code>stellarium_reference.md</code>.</p>
 </div>
 
 
