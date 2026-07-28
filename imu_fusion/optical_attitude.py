@@ -192,6 +192,27 @@ def pattern_roll_sigma_deg(body: str) -> float:
             else CRATER_ROLL_SIGMA_DEG)
 
 
+def differential_orientation_sigma_deg(state: KinematicState,
+                                       cam: TeleCameraSpec = DEFAULT_CAM,
+                                       disk: OpticalDiskSpec = DEFAULT_DISK
+                                       ) -> float:
+    ''' 1-sigma [deg] of the DIFFERENTIAL Sun-Moon disk orientation
+        (theta_sun - theta_moon), and therefore of the recovered (q_sun - q_moon).
+
+        This is the genuinely HORIZON-FREE observable.  A single disk gives only
+        theta_image = PA - q - roll, so q and the platform roll cannot be
+        separated without a vertical reference.  But with BOTH disks resolved at
+        one instant the platform roll is shared and CANCELS in the difference:
+
+            theta_sun - theta_moon = (PA_sun - PA_moon) - (q_sun - q_moon)
+
+        so no horizon/vertical is needed at all.  The error is just the two
+        surface-pattern orientation fits in quadrature -- no roll term. '''
+    s_sun = orientation_sigma_deg("Sun", state, cam, disk)
+    s_moon = orientation_sigma_deg("Moon", state, cam, disk)
+    return sqrt(s_sun ** 2 + s_moon ** 2)
+
+
 def parallactic_sigma_deg(body: str, state: KinematicState,
                           horizon_sigma_arcmin: float,
                           cam: TeleCameraSpec = DEFAULT_CAM,

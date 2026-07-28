@@ -158,6 +158,32 @@ def parallactic_angle_factor(key, gp, meas_q_deg, sigma_deg, lat0, lon0):
     return gtsam.CustomFactor(noise, [key], error)
 
 
+def differential_parallactic_factor(key, gp_sun, gp_moon, meas_dq_deg,
+                                    sigma_deg, lat0, lon0):
+    ''' A unary factor on a Pose3 for the DIFFERENTIAL Sun-Moon parallactic angle
+        (q_sun - q_moon).  This is the genuinely HORIZON-FREE position line: the
+        shared platform roll cancels between the two resolved disks, so the
+        measured (theta_sun - theta_moon) yields (q_sun - q_moon) with no vertical
+        reference (see optical_attitude.differential_orientation_sigma_deg). '''
+    noise = gtsam.noiseModel.Isotropic.Sigma(1, sigma_deg)
+
+    def predict(pose):
+        t = pose.translation()
+        lat, lon = enu_to_latlon(t[0], t[1], lat0, lon0)
+        dq = parallactic_angle_deg(lat, lon, gp_sun) \
+            - parallactic_angle_deg(lat, lon, gp_moon)
+        return (dq + 180.0) % 360.0 - 180.0
+
+    def error(this, values, H):
+        pose = values.atPose3(this.keys()[0])
+        resid = (predict(pose) - meas_dq_deg + 180.0) % 360.0 - 180.0
+        if H is not None:
+            H[0] = _reduced_en_jacobian(pose, predict, predict(pose))
+        return np.array([resid])
+
+    return gtsam.CustomFactor(noise, [key], error)
+
+
 # --------------------------------------------------------------------------- #
 # IMU preintegration
 # --------------------------------------------------------------------------- #
@@ -186,7 +212,8 @@ def _preintegrate(samples, params, bias):
 # --------------------------------------------------------------------------- #
 
 def build_graph(scenario, use_imu=True, use_azimuth=False,
-                use_parallactic=False, pos_prior_km=1000.0):
+                use_parallactic=False, pos_prior_km=1000.0,
+                use_differential=True):
     ''' Build the factor graph and initial values for a scenario. '''
     graph = gtsam.NonlinearFactorGraph()
     initial = gtsam.Values()
@@ -222,6 +249,15 @@ def build_graph(scenario, use_imu=True, use_azimuth=False,
                 graph.add(parallactic_angle_factor(
                     X(kf.index), o.gp, o.par_meas, o.par_sigma_deg,
                     lat0, lon0))
+        # Horizon-free DIFFERENTIAL Sun-Moon parallactic (roll cancels between the
+        # two resolved disks -- needs both bodies at this keyframe).
+        if (use_parallactic and use_differential
+                and getattr(kf, "diff_valid", False)):
+            gps = {o.body: o.gp for o in kf.observations}
+            if "Sun" in gps and "Moon" in gps:
+                graph.add(differential_parallactic_factor(
+                    X(kf.index), gps["Sun"], gps["Moon"],
+                    kf.diff_q_meas, kf.diff_q_sigma, lat0, lon0))
 
     if use_imu:
         params = _imu_params(imu)
@@ -243,11 +279,12 @@ def build_graph(scenario, use_imu=True, use_azimuth=False,
 
 
 def solve(scenario, use_imu=True, use_azimuth=False, use_parallactic=False,
-          pos_prior_km=1000.0):
+          pos_prior_km=1000.0, use_differential=True):
     ''' Optimise and return a result dict with per-keyframe estimates,
         covariances and errors vs. ground truth. '''
     graph, initial = build_graph(scenario, use_imu, use_azimuth,
-                                 use_parallactic, pos_prior_km)
+                                 use_parallactic, pos_prior_km,
+                                 use_differential)
     params = gtsam.LevenbergMarquardtParams()
     opt = gtsam.LevenbergMarquardtOptimizer(graph, initial, params)
     result = opt.optimize()

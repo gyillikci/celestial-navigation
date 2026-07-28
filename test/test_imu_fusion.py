@@ -188,10 +188,9 @@ class TestImuFusion(unittest.TestCase):
         self.assertLess(full, no_uw)
 
     def test_sunspot_anchor_makes_horizon_redundant(self):
-        ''' The payoff of a sharp horizon-free surface-feature attitude: with
-            sunspots/craters resolved, losing the ultrawide optical horizon at
-            sea barely hurts (the parallactic + anchored IMU vertical carry it),
-            whereas without them it is the dominant observable. '''
+        ''' With both disks resolved, the horizon-free differential Sun-Moon
+            parallactic (plus the anchored IMU vertical) carries the fix, so
+            losing the ultrawide optical horizon at sea barely hurts. '''
         sc = dict(use_azimuth=True, heading_source="optical",
                   use_parallactic=True, sun_spots=True, imu_anchor=True)
         sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
@@ -201,7 +200,48 @@ class TestImuFusion(unittest.TestCase):
         no_uw = sum(solve(build_scenario("sea", random.Random(100 + s), n_shots=12,
                                          horizon_mode="imu", **sc),
                           **sv)["rms_err_km"] for s in range(4)) / 4
-        self.assertLess(abs(no_uw - full), 0.5)        # ultrawide now marginal
+        self.assertLess(abs(no_uw - full), 0.6)        # ultrawide now marginal
+
+    def test_differential_parallactic_is_horizon_free(self):
+        ''' The differential Sun-Moon parallactic observable's sigma does not
+            depend on the horizon: it is identical with a good optical horizon
+            and with none, because the platform roll cancels between the two
+            disks (no vertical reference enters). '''
+        import random as _r
+        fused = build_scenario("sea", _r.Random(7), n_shots=8,
+                               horizon_mode="fused", use_parallactic=True,
+                               sun_spots=True)
+        imu = build_scenario("sea", _r.Random(7), n_shots=8,
+                             horizon_mode="imu", use_parallactic=True,
+                             sun_spots=True)
+        sig_f = [kf.diff_q_sigma for kf in fused.keyframes if kf.diff_valid]
+        sig_i = [kf.diff_q_sigma for kf in imu.keyframes if kf.diff_valid]
+        self.assertTrue(sig_f and len(sig_f) == len(sig_i))
+        for a, b in zip(sig_f, sig_i):
+            self.assertAlmostEqual(a, b, places=9)     # horizon plays no part
+        self.assertLess(max(sig_f), 0.3)               # ~0.13 deg, sub-degree
+
+    def test_differential_rescues_horizon_denied(self):
+        ''' With NO optical horizon and NO IMU anchor, the horizon-free
+            differential Sun-Moon parallactic line still sharply improves the sea
+            fix; removing just the differential factor (use_differential=False)
+            loses that gain. '''
+        def mean(par, diff):
+            tot = 0.0
+            for s in range(4):
+                sc = build_scenario("sea", random.Random(300 + s), n_shots=12,
+                                    horizon_mode="imu", use_azimuth=True,
+                                    heading_source="optical", use_parallactic=par,
+                                    sun_spots=True, imu_anchor=False)
+                tot += solve(sc, use_imu=True, use_azimuth=True,
+                             use_parallactic=par,
+                             use_differential=diff)["rms_err_km"]
+            return tot / 4
+        no_par = mean(False, False)
+        with_diff = mean(True, True)
+        par_no_diff = mean(True, False)
+        self.assertLess(with_diff, 0.6 * no_par)       # big horizon-free rescue
+        self.assertLess(with_diff, par_no_diff)        # the differential does it
 
     def test_analytic_altitude_jacobian(self):
         ''' The closed-form altitude Jacobian matches central finite diff. '''

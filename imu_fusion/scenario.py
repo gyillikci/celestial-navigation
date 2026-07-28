@@ -35,7 +35,8 @@ from .ultrawide_horizon import (UltrawideHorizonSpec, DEFAULT_UW,
 from .optical_attitude import (parallactic_angle_deg, parallactic_sigma_deg,
                                optical_heading_sigma_deg, moon_limb_available,
                                moon_bright_limb_heading_sigma_deg,
-                               moon_illuminated_fraction)
+                               moon_illuminated_fraction,
+                               differential_orientation_sigma_deg)
 from .visual_anchor import anchor_horizon_sigma_arcmin, coast_attitude_arcmin
 from .cloud import CloudSpec, body_clear_flags
 from .capture_trigger import PROFILES, simulate_trace, find_shutter_instants
@@ -79,6 +80,11 @@ class Keyframe:
     true_east: float
     true_north: float
     observations: list = field(default_factory=list)
+    # Horizon-free DIFFERENTIAL Sun-Moon parallactic observable (q_sun - q_moon),
+    # valid only when BOTH disks are resolved at this keyframe.
+    diff_q_meas: float = None
+    diff_q_sigma: float = None
+    diff_valid: bool = False
     # IMU samples (accel_body[3], gyro_body[3], dt) integrated to reach the NEXT
     # keyframe.  Empty for the last keyframe.
     imu_to_next: list = field(default_factory=list)
@@ -258,12 +264,13 @@ def build_scenario(regime: str,
                          else sun_spots)
                 if avail:
                     q_true = parallactic_angle_deg(lat, lon, gp)
-                    # The same resolved surface pattern that makes the disk
-                    # usable (Moon craters / Sun sunspots) also gives a
-                    # horizon-free roll, so the parallactic line does not lean on
-                    # the (possibly weak) horizon vertical.
-                    par_sig = parallactic_sigma_deg(body, kin, href, cam,
-                                                    pattern_roll=True)
+                    # A SINGLE disk's parallactic still needs a vertical: it gives
+                    # theta = PA - q - roll, so q and the platform roll cannot be
+                    # separated without the horizon.  Hence the roll reference here
+                    # is the actual horizon sigma (href) -- weak when the horizon
+                    # is weak.  The genuinely horizon-free line is the DIFFERENTIAL
+                    # Sun-Moon factor added below, where the roll cancels.
+                    par_sig = parallactic_sigma_deg(body, kin, href, cam)
                     par_meas = q_true + noise_scale * rng.gauss(0.0, par_sig)
                     par_valid = True
 
@@ -273,6 +280,21 @@ def build_scenario(regime: str,
                 meas_alt=meas_alt, meas_az=meas_az,
                 alt_sigma_arcmin=a_sig, az_sigma_arcmin=h_sig, kin=kin,
                 par_meas=par_meas, par_sigma_deg=par_sig, par_valid=par_valid))
+
+        # Horizon-free DIFFERENTIAL Sun-Moon parallactic (q_sun - q_moon): the
+        # shared platform roll CANCELS between the two resolved disks, so no
+        # vertical reference is needed.  Available only when BOTH disks are
+        # resolved (Sun sunspots + Moon limb) and both are cloud-clear this shot.
+        if (use_parallactic and sun_spots and "Sun" in bodies
+                and "Moon" in bodies and moon_limb_available(iso)
+                and clear_flags["Sun"][k] and clear_flags["Moon"][k]):
+            gp_sun, gp_moon = body_gp("Sun", iso), body_gp("Moon", iso)
+            dq_true = (parallactic_angle_deg(lat, lon, gp_sun)
+                       - parallactic_angle_deg(lat, lon, gp_moon))
+            dq_sig = differential_orientation_sigma_deg(kin, cam)
+            kf.diff_q_meas = dq_true + noise_scale * rng.gauss(0.0, dq_sig)
+            kf.diff_q_sigma = dq_sig
+            kf.diff_valid = True
         keyframes.append(kf)
 
     # IMU stream between consecutive keyframes.  With a constant, known level

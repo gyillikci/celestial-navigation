@@ -345,6 +345,7 @@ def exp_ablation(n_shots=12):
                               {**FULL_SV, "use_azimuth": False}),
         "- parallactic line": ({**FULL_SC, "use_parallactic": False},
                                {**FULL_SV, "use_parallactic": False}),
+        "- Δq (Sun-Moon)": (FULL_SC, {**FULL_SV, "use_differential": False}),
         "- gating": ({**FULL_SC, "gated": False}, FULL_SV),
         "- Moon (Sun only)": ({**FULL_SC, "bodies": ("Sun",)}, FULL_SV),
     }
@@ -499,8 +500,8 @@ def plot_horizon(hz, path):
 def plot_ablation(ab, path):
     ''' Leave-one-out degradation from full fusion, per regime. '''
     order = ["full fusion", "- ultrawide horizon", "- IMU link",
-             "- optical azimuth", "- parallactic line", "- gating",
-             "- Moon (Sun only)"]
+             "- optical azimuth", "- parallactic line", "- Δq (Sun-Moon)",
+             "- gating", "- Moon (Sun only)"]
     fig, ax = plt.subplots(figsize=(9, 4.8))
     x = np.arange(len(order))
     w = 0.26
@@ -871,6 +872,12 @@ def plot_factorgraph(path):
             fac(fpos, s=0.14)
             link(fpos, xp, color=acc, lw=0.8)
             ax.text(fx, -2.28, name, ha="center", fontsize=7.0, color=acc)
+        # horizon-free DIFFERENTIAL Sun-Moon parallactic factor (roll cancels)
+        dp = (xp[0] + 1.12, xp[1] + 0.9)
+        fac(dp, color="#3ddc97")
+        link(dp, xp, color="#2fae79")
+        ax.text(dp[0] + 0.02, dp[1] + 0.32, "Δq ☉−☾", ha="center",
+                fontsize=6.8, color="#0a7d54")
     # IMU factors between consecutive keyframes
     for i in range(len(X) - 1):
         mid = ((xs[i] + xs[i + 1]) / 2, 1.2)
@@ -883,10 +890,12 @@ def plot_factorgraph(path):
     ax.text(6.0, 3.7, "Unified factor graph — one keyframe per Sun+Moon shot",
             ha="center", fontsize=12, weight="bold", color=ink)
     ax.text(6.0, -2.95,
-            "alt = altitude line   az = azimuth line   q = parallactic line   "
-            "(☉ Sun, ☾ Moon)\nEach celestial factor's covariance is built from "
-            "the fused attitude references:\nIMU gravity  +  ultrawide optical "
-            "horizon  +  tele-disk orientation (bright limb / sunspot P-angle)",
+            "alt = altitude line   az = azimuth line   q = per-body parallactic "
+            "(needs the horizon)   (☉ Sun, ☾ Moon)\n"
+            "Δq ☉−☾ = differential Sun−Moon parallactic — HORIZON-FREE (the shared "
+            "platform roll cancels between the two resolved disks).\n"
+            "Each celestial factor's covariance is built from the fused attitude "
+            "references: IMU gravity + ultrawide horizon + tele-disk orientation.",
             ha="center", fontsize=8.5, color=ink)
     fig.savefig(path, dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -1033,8 +1042,9 @@ def write_results_md(data, path):
              f"**Moon's bright limb** is only ~{hdb['sea']['moon']:.1f}° "
              f"(phase-limited, and degenerate near full) — *looser than the "
              f"magnetometer*. So in daytime the heading should come from the "
-             f"Sun; the Moon's limb is a night / Sun-occluded backup. Either way "
-             f"the disk adds a horizon-free parallactic line; on a weak (IMU) "
+             f"Sun; the Moon's limb is a night / Sun-occluded backup. And the "
+             f"**difference** of the two disks' orientations gives a genuinely "
+             f"horizon-free position line (Δq, roll cancels); on a weak (IMU) "
              f"horizon at sea the optical stack cuts the fix from "
              f"{op['sea']['alt'][0]:.0f} km to {op['sea']['optical'][0]:.0f} km.\n")
     L.append("6. **Geometry matters:** the fix is well-conditioned only when "
@@ -1126,7 +1136,12 @@ def write_results_md(data, path):
              "orientation** (Moon bright limb, Sun sunspot P-angle) gives a "
              "**magnetometer-free heading**. *Position lines.*")
     L.append("- **Parallactic angle q** of each body — the disk orientation vs. "
-             "the vertical. *Independent, horizon-free position line.*")
+             "the vertical. *A per-body position line, but it needs the horizon* "
+             "(a single disk gives θ = PA − q − roll; q and roll don't separate "
+             "without a vertical).")
+    L.append("- **Differential Δq (Sun−Moon)** — the difference of the two disks' "
+             "orientations. The shared platform roll **cancels**, so this is the "
+             "genuinely **horizon-free** position line. *Needs both disks resolved.*")
     L.append("- **IMU preintegration** between shots (+ bias state). *Links the "
              "trajectory, smooths many fixes.*")
     L.append("- **Least-rotation gating** — selects the calm shutter instants "
@@ -1143,8 +1158,8 @@ def write_results_md(data, path):
     L.append("Starting from the full fusion and removing one observable at a "
              "time:\n")
     keys = ["full fusion", "- ultrawide horizon", "- IMU link",
-            "- optical azimuth", "- parallactic line", "- gating",
-            "- Moon (Sun only)"]
+            "- optical azimuth", "- parallactic line", "- Δq (Sun-Moon)",
+            "- gating", "- Moon (Sun only)"]
     L.append("| Regime | " + " | ".join(keys) + " |")
     L.append("|" + "---|" * (len(keys) + 1))
     for r in REGIMES:
@@ -1406,10 +1421,13 @@ def write_results_md(data, path):
              "parallactic line\n")
     L.append("The tele lens resolves the disk, not just a dot. The Moon's "
              "bright limb (and the Sun's sunspot P-angle) give an *absolute* "
-             "celestial orientation in the image. Measured against the gravity "
-             "vertical, it yields the parallactic angle *q(lat, lon)* — a "
-             "heading reference that needs no magnetometer, and an independent, "
-             "horizon-free position line.\n")
+             "celestial orientation in the image, which yields the parallactic "
+             "angle *q(lat, lon)* — a magnetometer-free heading and a position "
+             "line. A single disk's *q* still needs a vertical (θ = PA − q − "
+             "roll), but the **difference** of the two disks' orientations, "
+             "**Δq(Sun−Moon)**, cancels the shared platform roll and so is a "
+             "genuinely **horizon-free** position line (it needs both disks "
+             "resolved).\n")
     hd = data["heading_budget"]
     L.append("Heading sigma (degrees) — magnetometer vs. optical disk:\n")
     L.append("| Regime | magnetometer | optical (Moon limb) |")
@@ -1514,7 +1532,8 @@ def write_dashboard(data, path):
                 f"<td class='mono'>{bat/strm:.0f}×</td>"
                 f"<td class='mono'>{bf:.2f} / {sf:.2f} km</td></tr>")
     abkeys = ["- ultrawide horizon", "- IMU link", "- optical azimuth",
-              "- parallactic line", "- gating", "- Moon (Sun only)"]
+              "- parallactic line", "- Δq (Sun-Moon)", "- gating",
+              "- Moon (Sun only)"]
 
     def ffrow(r):
         return (f"<tr><td>{REGIME_LABEL[r]}</td>"
@@ -1654,7 +1673,7 @@ tele-disk orientation.</p>
 position.</figcaption></figure>
 <table><tr><th>Regime</th><th>full fusion</th>
 <th>− ultrawide</th><th>− IMU</th><th>− opt. az</th><th>− parallactic</th>
-<th>− gating</th><th>− Moon</th></tr>
+<th>− Δq(☉−☾)</th><th>− gating</th><th>− Moon</th></tr>
 {ffrow('land')}{ffrow('sea')}{ffrow('air')}</table>
 <p class='note'>Leave-one-out: the first column is the full fusion; each other
 column removes one observable, so a bigger number is a more valuable observable.</p>
@@ -1691,12 +1710,14 @@ back to the IMU.</p>
 <h2>The tele lens as an instrument, not a pointer</h2>
 <p>Resolving the disk gives an absolute celestial orientation: a
 <em>magnetometer-free heading</em> (which makes the azimuth lines of position
-usable) and a horizon-free <em>parallactic</em> position line. But the two bodies
-are not equal as a compass — the <b>Sun's</b> sharp disk is precise, while the
-<b>Moon's bright limb</b> is only ~2° (phase-limited, degenerate near full),
-looser than a magnetometer. In daytime, with both up, take the heading from the
-<b>Sun</b>; the Moon's limb is a night / Sun-occluded backup. Shown on the weak
-IMU horizon so the gain is visible.</p>
+usable) and a <em>parallactic</em> position line. A single disk's parallactic
+still needs a vertical (θ = PA − q − roll), so it is <em>not</em> horizon-free on
+its own; the genuinely horizon-free line is the <b>difference</b> of the two
+disks' orientations, <b>Δq(Sun−Moon)</b>, where the shared platform roll cancels.
+As a compass the bodies are unequal — the <b>Sun's</b> sharp disk is precise,
+the <b>Moon's bright limb</b> only ~2° (phase-limited, degenerate near full),
+looser than a magnetometer — so in daytime take the heading from the <b>Sun</b>.
+Shown on the weak IMU horizon so the gain is visible.</p>
 <table><tr><th>Regime</th><th>heading σ (mag / optical)</th><th>alt only</th>
 <th>+az (mag)</th><th>+az (optical)</th><th>+optical &amp; parallactic</th></tr>
 {orow('land')}{orow('sea')}{orow('air')}</table>

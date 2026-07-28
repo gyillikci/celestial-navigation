@@ -37,7 +37,7 @@ instants (local minima of |ω|) to keep each IMU-photo pair clean.
 | `iphone_model.py` | Representative iPhone-class IMU + tele-camera noise; how motion corrupts the gravity horizon. |
 | `realtime.py` | Streaming estimator (`gtsam_unstable.IncrementalFixedLagSmoother`) — bounded per-shot latency for on-device use; `bench.py` benchmarks it vs batch. |
 | `ultrawide_horizon.py` | Optical horizon from the ultrawide lens (fired with the tele): an acceleration-immune tilt reference, fused with the IMU. Reuses `starfix.get_dip_of_horizon`. |
-| `optical_attitude.py` | Orientation from the tele-resolved disk: Moon bright-limb PA, illuminated fraction, Sun P-angle, and the parallactic angle *q* → magnetometer-free heading + a horizon-free position line. |
+| `optical_attitude.py` | Orientation from the tele-resolved disk: Moon bright-limb PA, illuminated fraction, Sun P-angle, and the parallactic angle *q* → magnetometer-free heading + position line. The *differential* Sun−Moon orientation (`differential_orientation_sigma_deg`) is the genuinely horizon-free line (shared platform roll cancels). |
 | `visual_anchor.py` | Tracked sunspot / disk feature as a star-tracker anchor: bounds gyro drift and gives an acceleration-immune attitude/vertical (moving or stationary) — rescues the fix when the optical horizon is unavailable. Also the cloud-outage coast models. |
 | `cloud.py` | Temporally-correlated cloud occlusion (Markov passages): drops obscured sights and coasts the anchor — graceful degradation and a coast-time budget. |
 | `capture_trigger.py` | Per-regime hand/platform disturbance model and the least-rotation "smart shutter" (gated vs. periodic). |
@@ -71,7 +71,8 @@ in `run_study.py`):
 | Altitude of Sun & Moon | tele + horizon reference | position lines |
 | Horizon reference | IMU gravity ⊕ ultrawide optical horizon | sets altitude covariance |
 | Azimuth of Sun & Moon | tele-disk heading (magnetometer-free) | position lines |
-| Parallactic angle *q* | tele-disk orientation vs. vertical | horizon-free position line |
+| Parallactic angle *q* (per body) | tele-disk orientation vs. vertical | position line (needs the horizon) |
+| Differential Δq (Sun−Moon) | difference of the two disks' orientations | **horizon-free** line (shared roll cancels) |
 | IMU preintegration + bias | IMU | links & smooths the trajectory |
 | Least-rotation gating | gyro | picks clean shutter instants |
 | Coarse position prior | last known / DR | disambiguation only |
