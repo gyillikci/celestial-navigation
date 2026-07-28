@@ -159,19 +159,27 @@ def parallactic_angle_factor(key, gp, meas_q_deg, sigma_deg, lat0, lon0):
 
 
 def differential_parallactic_factor(key, gp_sun, gp_moon, meas_dq_deg,
-                                    sigma_deg, lat0, lon0):
+                                    sigma_deg, lat0, lon0,
+                                    moon_off_en=(0.0, 0.0)):
     ''' A unary factor on a Pose3 for the DIFFERENTIAL Sun-Moon parallactic angle
         (q_sun - q_moon).  This is the genuinely HORIZON-FREE position line: the
         shared platform roll cancels between the two resolved disks, so the
         measured (theta_sun - theta_moon) yields (q_sun - q_moon) with no vertical
-        reference (see optical_attitude.differential_orientation_sigma_deg). '''
+        reference (see optical_attitude.differential_orientation_sigma_deg).
+
+        With ONE phone the two disks are shot SEQUENTIALLY, so the Moon shot is at
+        a dead-reckoned position `moon_off_en` (= known velocity x inter-shot gap)
+        ahead of the Sun-shot pose; the Sun is evaluated at the pose, the Moon at
+        pose + offset.  Default (0,0) = simultaneous/co-located. '''
     noise = gtsam.noiseModel.Isotropic.Sigma(1, sigma_deg)
+    off_e, off_n = moon_off_en
 
     def predict(pose):
         t = pose.translation()
-        lat, lon = enu_to_latlon(t[0], t[1], lat0, lon0)
-        dq = parallactic_angle_deg(lat, lon, gp_sun) \
-            - parallactic_angle_deg(lat, lon, gp_moon)
+        lat_s, lon_s = enu_to_latlon(t[0], t[1], lat0, lon0)
+        lat_m, lon_m = enu_to_latlon(t[0] + off_e, t[1] + off_n, lat0, lon0)
+        dq = parallactic_angle_deg(lat_s, lon_s, gp_sun) \
+            - parallactic_angle_deg(lat_m, lon_m, gp_moon)
         return (dq + 180.0) % 360.0 - 180.0
 
     def error(this, values, H):
@@ -254,10 +262,15 @@ def build_graph(scenario, use_imu=True, use_azimuth=False,
         if (use_parallactic and use_differential
                 and getattr(kf, "diff_valid", False)):
             gps = {o.body: o.gp for o in kf.observations}
-            if "Sun" in gps and "Moon" in gps:
-                graph.add(differential_parallactic_factor(
-                    X(kf.index), gps["Sun"], gps["Moon"],
-                    kf.diff_q_meas, kf.diff_q_sigma, lat0, lon0))
+            if "Sun" in gps:
+                # Moon is the DR-advanced sequential shot (its gp is at t+gap).
+                gp_moon = getattr(kf, "diff_moon_gp", None) or gps.get("Moon")
+                off = getattr(kf, "diff_moon_off_en", (0.0, 0.0))
+                if gp_moon is not None:
+                    graph.add(differential_parallactic_factor(
+                        X(kf.index), gps["Sun"], gp_moon,
+                        kf.diff_q_meas, kf.diff_q_sigma, lat0, lon0,
+                        moon_off_en=off))
 
     if use_imu:
         params = _imu_params(imu)

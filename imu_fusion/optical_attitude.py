@@ -207,7 +207,13 @@ def differential_orientation_sigma_deg(state: KinematicState,
             theta_sun - theta_moon = (PA_sun - PA_moon) - (q_sun - q_moon)
 
         so no horizon/vertical is needed at all.  The error is just the two
-        surface-pattern orientation fits in quadrature -- no roll term. '''
+        surface-pattern orientation fits in quadrature -- no roll term.
+
+        NOTE: with one phone the two disks are shot sequentially, so the shared
+        roll only cancels to the extent the GYRO carries the vertical across the
+        inter-shot slew.  That gyro-roll-carry error (grows ~sqrt(gap)) is added
+        by the caller (scenario.build_scenario) -- it is what erodes the
+        horizon-free purity as the slew gets longer. '''
     s_sun = orientation_sigma_deg("Sun", state, cam, disk)
     s_moon = orientation_sigma_deg("Moon", state, cam, disk)
     return sqrt(s_sun ** 2 + s_moon ** 2)

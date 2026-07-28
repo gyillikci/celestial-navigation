@@ -81,10 +81,14 @@ class Keyframe:
     true_north: float
     observations: list = field(default_factory=list)
     # Horizon-free DIFFERENTIAL Sun-Moon parallactic observable (q_sun - q_moon),
-    # valid only when BOTH disks are resolved at this keyframe.
+    # valid only when BOTH disks are resolved at this keyframe.  With one phone the
+    # Moon is shot t+gap later, so it carries its own gp (at t+gap) and a
+    # dead-reckoned ENU offset from the Sun-shot pose.
     diff_q_meas: float = None
     diff_q_sigma: float = None
     diff_valid: bool = False
+    diff_moon_gp: object = None
+    diff_moon_off_en: tuple = (0.0, 0.0)
     # IMU samples (accel_body[3], gyro_body[3], dt) integrated to reach the NEXT
     # keyframe.  Empty for the last keyframe.
     imu_to_next: list = field(default_factory=list)
@@ -149,7 +153,8 @@ def build_scenario(regime: str,
                    imu_anchor: bool = False,
                    anchor_track_s: float = 10.0,
                    anchor_pos_km: float = 3.0,
-                   cloud: CloudSpec = None) -> Scenario:
+                   cloud: CloudSpec = None,
+                   intershot_gap_s: float = 3.0) -> Scenario:
     ''' Generate a full scenario: trajectory, true geometry, noisy measurements
         and IMU stream.
 
@@ -285,16 +290,36 @@ def build_scenario(regime: str,
         # shared platform roll CANCELS between the two resolved disks, so no
         # vertical reference is needed.  Available only when BOTH disks are
         # resolved (Sun sunspots + Moon limb) and both are cloud-clear this shot.
+        # ONE PHONE -> the two disks are shot SEQUENTIALLY: Sun now (t, this pose),
+        # Moon `intershot_gap_s` later after a ~94 deg slew.  So the Moon is
+        # evaluated at t+gap and at the dead-reckoned position (advanced by the
+        # known velocity x gap); the graph's factor corrects that DR offset, and
+        # the only gap penalty is the gyro-carried roll error across the slew --
+        # which is what erodes the "horizon-free" purity as the gap grows.
         if (use_parallactic and sun_spots and "Sun" in bodies
                 and "Moon" in bodies and moon_limb_available(iso)
                 and clear_flags["Sun"][k] and clear_flags["Moon"][k]):
-            gp_sun, gp_moon = body_gp("Sun", iso), body_gp("Moon", iso)
+            gp_sun = body_gp("Sun", iso)
+            t_moon = t_s + intershot_gap_s
+            iso_moon = _iso(t_moon)
+            gp_moon = body_gp("Moon", iso_moon)
+            off_e, off_n = ve * intershot_gap_s, vn * intershot_gap_s
+            lat_m, lon_m = enu_to_latlon(east + off_e, north + off_n,
+                                         base_lat, base_lon)
             dq_true = (parallactic_angle_deg(lat, lon, gp_sun)
-                       - parallactic_angle_deg(lat, lon, gp_moon))
-            dq_sig = differential_orientation_sigma_deg(kin, cam)
+                       - parallactic_angle_deg(lat_m, lon_m, gp_moon))
+            # Orientation-fit noise (horizon-free) + gyro roll carried over the
+            # inter-shot slew (grows ~sqrt(gap)); no horizon term.  gap<=0 is the
+            # simultaneous idealisation (no carry).
+            roll_carry_deg = (coast_attitude_arcmin(intershot_gap_s, imu) / 60.0
+                              if intershot_gap_s > 0 else 0.0)
+            dq_sig = (differential_orientation_sigma_deg(kin, cam) ** 2
+                      + roll_carry_deg ** 2) ** 0.5
             kf.diff_q_meas = dq_true + noise_scale * rng.gauss(0.0, dq_sig)
             kf.diff_q_sigma = dq_sig
             kf.diff_valid = True
+            kf.diff_moon_gp = gp_moon
+            kf.diff_moon_off_en = (off_e, off_n)
         keyframes.append(kf)
 
     # IMU stream between consecutive keyframes.  With a constant, known level

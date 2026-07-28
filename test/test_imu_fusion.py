@@ -243,6 +243,32 @@ class TestImuFusion(unittest.TestCase):
         self.assertLess(with_diff, 0.6 * no_par)       # big horizon-free rescue
         self.assertLess(with_diff, par_no_diff)        # the differential does it
 
+    def test_sequential_gap_grows_sigma_but_dr_removes_bias(self):
+        ''' One phone = sequential shots.  The differential sigma grows with the
+            inter-shot slew gap (gyro roll carried across the slew), while the
+            dead-reckoned Moon offset removes the v*gap translation, so even a big
+            gap in the AIR recovers truth under zero noise (no bias). '''
+        sigmas = []
+        for gap in (0.0, 5.0, 30.0):
+            sc = build_scenario("air", random.Random(9), n_shots=8,
+                                horizon_mode="imu", use_parallactic=True,
+                                sun_spots=True, intershot_gap_s=gap)
+            s = [kf.diff_q_sigma for kf in sc.keyframes if kf.diff_valid]
+            off = [kf.diff_moon_off_en for kf in sc.keyframes if kf.diff_valid]
+            sigmas.append(s[0])
+            if gap > 0:
+                self.assertGreater(abs(off[0][0]) + abs(off[0][1]), 1.0)  # DR moved
+        self.assertLess(sigmas[0], sigmas[1])          # sigma grows with gap
+        self.assertLess(sigmas[1], sigmas[2])
+        # zero-noise air with a large gap: DR offset removes the translation bias
+        sc = build_scenario("air", random.Random(10), n_shots=6, noise_scale=0.0,
+                            horizon_mode="imu", use_azimuth=True,
+                            heading_source="optical", use_parallactic=True,
+                            sun_spots=True, intershot_gap_s=20.0)
+        rms = solve(sc, use_imu=True, use_azimuth=True,
+                    use_parallactic=True)["rms_err_km"]
+        self.assertLess(rms, 0.5)                       # no translation bias
+
     def test_analytic_altitude_jacobian(self):
         ''' The closed-form altitude Jacobian matches central finite diff. '''
         import numpy as np

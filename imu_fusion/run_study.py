@@ -234,6 +234,31 @@ def exp_coast(times=(5, 15, 30, 60, 120, 180, 300)):
     return coast_curve(times)
 
 
+def exp_intershot(gaps=(0, 2, 5, 10, 20, 30), n_shots=12):
+    ''' One phone -> sequential Sun/Moon shots.  Sweep the inter-shot slew gap and
+        report the fix on the WEAK (IMU) horizon, where the horizon-free
+        differential Sun-Moon line is load-bearing.  The DR offset removes the
+        v*gap translation, so the penalty is the gyro-carried roll over the slew,
+        plus the differential's 0.13 deg orientation floor. '''
+    sc_kw = dict(horizon_mode="imu", use_azimuth=True, heading_source="optical",
+                 use_parallactic=True, sun_spots=True, imu_anchor=False)
+    sv = dict(use_imu=True, use_azimuth=True, use_parallactic=True)
+    out = {"gaps": list(gaps)}
+    for r in REGIMES:
+        rms, sig = [], []
+        for g in gaps:
+            vals, sigs = [], []
+            for s in range(N_SEEDS):
+                sc = build_scenario(r, random.Random(7700 + s), n_shots=n_shots,
+                                    intershot_gap_s=g, **sc_kw)
+                vals.append(solve(sc, **sv)["rms_err_km"])
+                sigs += [kf.diff_q_sigma for kf in sc.keyframes if kf.diff_valid]
+            rms.append(_mean_std(vals))
+            sig.append(float(np.mean(sigs)) if sigs else float("nan"))
+        out[r] = {"rms": rms, "diff_sigma_deg": sig}
+    return out
+
+
 def exp_anchor_drift(times=(0.5, 1, 2, 5, 10, 30, 60, 120, 300)):
     ''' Attitude error vs tracking time: gyro-only vs accelerometer-aided vs
         visual-anchor-aided, stationary and moving. '''
@@ -652,6 +677,35 @@ def plot_coast(cc, path):
     a2.grid(alpha=0.3)
     a2.legend(fontsize=8)
     fig.suptitle("Coast budget when the sky is lost", fontsize=12)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def plot_intershot(it, path):
+    ''' One phone -> sequential shots: fix (and the differential sigma) vs the
+        inter-shot slew gap, per regime. '''
+    g = it["gaps"]
+    cols = {"land": "#c8992e", "sea": "#1f8a9c", "air": "#3f76c4"}
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.4))
+    for r in REGIMES:
+        rms = [m[0] for m in it[r]["rms"]]
+        a1.plot(g, rms, marker="o", color=cols[r], label=REGIME_LABEL[r])
+    a1.set_xlabel("inter-shot slew gap (s)")
+    a1.set_ylabel("fix RMS (km)")
+    a1.set_title("Fix vs sequential-shot gap (weak IMU horizon)")
+    a1.grid(alpha=0.3)
+    a1.legend(fontsize=8)
+    a2.plot(g, it["air"]["diff_sigma_deg"], marker="s", color="#5b6b86")
+    a2.axhline(0.135, color="#666", ls=":", lw=1)
+    a2.text(g[0], 0.138, "0.13° orientation floor", fontsize=7, color="#666")
+    a2.set_xlabel("inter-shot slew gap (s)")
+    a2.set_ylabel("differential Δq σ (deg)")
+    a2.set_title("Horizon-free purity erodes with the slew\n(gyro carries the "
+                 "vertical across the gap)")
+    a2.grid(alpha=0.3)
+    fig.suptitle("Δq(Sun−Moon) with one phone: how long a slew can you afford?",
+                 fontsize=12)
     fig.tight_layout()
     fig.savefig(path, dpi=130)
     plt.close(fig)
@@ -1115,6 +1169,36 @@ def write_results_md(data, path):
                  "*lunar-distance* method. That is exactly the lever when a "
                  "photo's timestamp is missing: the sky itself carries the "
                  "clock.\n")
+
+    # ------- one phone: sequential shots -------
+    it = data.get("intershot")
+    if it:
+        g = it["gaps"]
+        L.append("## One phone → sequential shots: how long a slew can you "
+                 "afford?\n")
+        L.append("The horizon-free **Δq(Sun−Moon)** line needs *both* disks, but "
+                 "with a single phone you shoot the Sun, then slew ~94° and shoot "
+                 "the Moon a few seconds later. The Moon shot is dead-reckoned "
+                 "(the factor advances it by your known velocity × gap, so the "
+                 "translation — 0 on land, ~0.6 km/s in the air — is removed), "
+                 "and each disk keeps its own timestamp. What is left is the "
+                 "**gyro carrying the vertical across the slew**: that roll-carry "
+                 "error grows ~√gap and is what erodes the horizon-free purity.\n")
+        L.append("| Slew gap | Δq σ | " +
+                 " | ".join(REGIME_LABEL[r] + " fix" for r in REGIMES) + " |")
+        L.append("|---|---|" + "---|" * len(REGIMES))
+        for i, gg in enumerate(g):
+            L.append(f"| {gg:.0f} s | {it['air']['diff_sigma_deg'][i]:.2f}° | " +
+                     " | ".join(cell(it[r]['rms'][i]) for r in REGIMES) + " |")
+        L.append("\n![intershot](results/fig_intershot.png)\n")
+        L.append("The fix is essentially flat for a quick slew and degrades only "
+                 "as the gyro-carry crosses the ~0.13° differential floor "
+                 "(tens of seconds). **Land** is unaffected (no translation, "
+                 "little drift); **sea/air** are fine for a brisk slew because "
+                 "the known velocity removes the translation — the limit is how "
+                 "steadily the gyro holds the vertical, not how far you moved. "
+                 "Practical guidance: take the two shots back-to-back (a few "
+                 "seconds), and the differential stays horizon-free.\n")
 
     # ------- unified full-fusion section -------
     ab = data["ablation"]
@@ -1613,6 +1697,32 @@ position σ. Right: the elongation-as-clock precision vs how well the Sun–Moon
 separation is measured.</figcaption></figure>
 </div>
 """
+    it = data.get("intershot")
+    is_card = ""
+    if it:
+        rows = "".join(
+            f"<tr><td>{gg:.0f} s</td><td class='mono'>{it['air']['diff_sigma_deg'][i]:.2f}°</td>"
+            + "".join(f"<td class='mono'>{cell(it[r]['rms'][i])}</td>" for r in REGIMES)
+            + "</tr>" for i, gg in enumerate(it["gaps"]))
+        is_card = f"""
+<div class='card'>
+<h2>One phone → sequential shots: how long a slew can you afford?</h2>
+<p>The horizon-free <b>Δq(Sun−Moon)</b> line needs both disks, but a single phone
+shoots the Sun, then slews ~94° and shoots the Moon a few seconds later. The Moon
+shot is <b>dead-reckoned</b> (the factor advances it by your known velocity × gap,
+so the translation — 0 on land, ~0.6 km/s in air — is removed) and each disk keeps
+its own timestamp. What remains is the <b>gyro carrying the vertical across the
+slew</b>: that roll-carry grows ~√gap and erodes the horizon-free purity.</p>
+<table><tr><th>Slew gap</th><th>Δq σ (air)</th>{"".join(f"<th>{REGIME_LABEL[r]} fix</th>" for r in REGIMES)}</tr>
+{rows}</table>
+<figure><img src='results/fig_intershot.png'><figcaption>Fix and differential σ
+vs the inter-shot slew gap. Flat for a quick slew; degrades only as the gyro-carry
+crosses the ~0.13° differential floor (tens of seconds).</figcaption></figure>
+<p class='note'>Take the two shots back-to-back (a few seconds) and the
+differential stays horizon-free; the limit is how steadily the gyro holds the
+vertical during the slew, not how far you moved.</p>
+</div>
+"""
     imgs = "".join(
         f"<figure><img src='results/{fn}'><figcaption>{cap}</figcaption></figure>"
         for fn, cap in [
@@ -1786,6 +1896,7 @@ bodies are lost: sub-km for ~2 minutes, then dead-reckoning runs away.</figcapti
 </div>
 {gt_card}
 {el_card}
+{is_card}
 
 <div class='card'>
 <h2>Least-rotation capture trigger</h2>
@@ -1826,6 +1937,7 @@ def main():
                 cloud=exp_cloud(), coast=exp_coast(),
                 groundtruth=exp_groundtruth(),
                 elongation=exp_elongation_budget(),
+                intershot=exp_intershot(),
                 convergence=exp_convergence(), sensor_budget=exp_sensor_budget())
     with open(os.path.join(OUT, "results.json"), "w") as f:
         json.dump(data, f, indent=2, default=lambda o: list(o)
@@ -1846,6 +1958,7 @@ def main():
     plot_anchor_fix(data["anchor_fix"], os.path.join(OUT, "fig_anchor_fix.png"))
     plot_cloud(data["cloud"], os.path.join(OUT, "fig_cloud.png"))
     plot_coast(data["coast"], os.path.join(OUT, "fig_coast.png"))
+    plot_intershot(data["intershot"], os.path.join(OUT, "fig_intershot.png"))
     if data.get("groundtruth", {}).get("engine"):
         plot_groundtruth(data["groundtruth"],
                          os.path.join(OUT, "fig_groundtruth.png"))
