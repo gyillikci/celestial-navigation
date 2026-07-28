@@ -1,0 +1,36 @@
+# XcodeGen spec — generates CelestialFixMVP.xcodeproj.
+#   brew install xcodegen && xcodegen generate && open CelestialFixMVP.xcodeproj
+name: CelestialFixMVP
+options:
+  bundleIdPrefix: com.example.celestialfix
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+targets:
+  CelestialFixMVP:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Celestial Fix
+        NSCameraUsageDescription: "Photographs the Moon through the telephoto lens to compute your position."
+        NSMotionUsageDescription: "Uses the motion sensors as a gravity-based artificial horizon."
+        NSLocationWhenInUseUsageDescription: "Seeds the fix with a coarse position; the sky measurement provides the accuracy."
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    settings:
+      base:
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+  CelestialFixMVPTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+    dependencies:
+      - target: CelestialFixMVP

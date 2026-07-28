@@ -196,6 +196,11 @@ with covariance in a minimal SwiftUI view. That proves the capture→feature→G
 spine on real hardware; every other observable (Sun, ultrawide horizon, Δq, streaming)
 is then an additive factor on the same graph.
 
+> **This MVP is written and lives at [`../ios/CelestialFixMVP/`](../ios/CelestialFixMVP/)**
+> (dependency-free Swift + XcodeGen; see its README for build steps, the sim-module→file
+> map, and honest caveats). It uses a hand-rolled 2-DOF Gauss-Newton solve as the GTSAM
+> stand-in and a truncated ephemeris — a plumbing demo, not yet a navigation instrument.
+
 ---
 
 *Grounded in the validated `imu_fusion` study; numbers cited trace to `RESULTS.md`.
