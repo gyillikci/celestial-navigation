@@ -1083,5 +1083,127 @@ class TestTerrainResection(unittest.TestCase):
         self.assertEqual(float(z[0]), 0.0)                 # sea level, no crash
 
 
+@unittest.skipUnless(_HAVE, "gtsam / numpy not installed")
+class TestTerrainFactors(unittest.TestCase):
+    ''' Terrain landmarks as GTSAM factors, and what a magnetometer heading is
+        actually worth. '''
+
+    LAT0, LON0 = 37.0270, 27.3620
+
+    def _landmarks(self):
+        from imu_fusion.terrain_factors import Landmark
+        return [Landmark("A", 36.90, 27.20, 900.0),
+                Landmark("B", 36.92, 27.32, 700.0),
+                Landmark("C", 36.94, 27.45, 850.0),
+                Landmark("D", 37.05, 27.52, 600.0)]
+
+    def test_bearing_helper_and_sigma_composition(self):
+        from imu_fusion.terrain_factors import bearing_deg, bearing_sigma_deg
+        # due north / due east sanity
+        self.assertAlmostEqual(bearing_deg(37.0, 27.0, 38.0, 27.0), 0.0, places=3)
+        self.assertAlmostEqual(bearing_deg(37.0, 27.0, 37.0, 28.0), 90.0, delta=0.5)
+        # the magnetometer dominates an absolute bearing
+        s = bearing_sigma_deg(pixel_sigma_deg=0.05, mag_sigma_deg=1.5)
+        self.assertGreater(s, 1.4)
+        self.assertLess(s, 1.6)
+
+    def test_zero_noise_recovery_from_landmarks(self):
+        ''' Exact measurements must return the true position. '''
+        from imu_fusion.terrain_factors import (solve_landmark_fix,
+                                                synthesize_measurements)
+        from imu_fusion.astro import great_circle_km
+        lms = self._landmarks()
+        b, e, a = synthesize_measurements(self.LAT0, self.LON0, lms)
+        fix = solve_landmark_fix(
+            bearings=[(lm, m, 0.5) for lm, m in b],
+            elevations=[(lm, m, 0.1) for lm, m in e],
+            horizontal_angles=[(x, y, m, 0.05) for x, y, m in a],
+            lat0=self.LAT0, lon0=self.LON0,
+            prior_en_m=(3000.0, -2500.0), prior_sigma_km=30.0)
+        err_km = great_circle_km(self.LAT0, self.LON0, fix["lat"], fix["lon"])
+        self.assertLess(err_km, 0.05, f"zero-noise fix off by {err_km*1000:.0f} m")
+        self.assertEqual(fix["n_factors"], len(b) + len(e) + len(a))
+
+    def test_horizontal_angles_are_compass_free(self):
+        ''' THE MAGNETOMETER LESSON.  A heading bias corrupts every absolute
+            bearing but cancels exactly in the subtended angles, so a
+            bearing-only fix is dragged away while the horizontal-angle fix is
+            untouched. '''
+        from imu_fusion.terrain_factors import (solve_landmark_fix,
+                                                synthesize_measurements)
+        from imu_fusion.astro import great_circle_km
+        lms = self._landmarks()
+        BIAS = 6.0                                   # deg of compass error
+        b, e, a = synthesize_measurements(self.LAT0, self.LON0, lms,
+                                          heading_bias_deg=BIAS)
+        common = dict(lat0=self.LAT0, lon0=self.LON0,
+                      prior_en_m=(1500.0, -1500.0), prior_sigma_km=30.0)
+        bearing_fix = solve_landmark_fix(
+            bearings=[(lm, m, 0.5) for lm, m in b], **common)
+        angle_fix = solve_landmark_fix(
+            horizontal_angles=[(x, y, m, 0.05) for x, y, m in a], **common)
+        err_bearing = great_circle_km(self.LAT0, self.LON0,
+                                      bearing_fix["lat"], bearing_fix["lon"])
+        err_angle = great_circle_km(self.LAT0, self.LON0,
+                                    angle_fix["lat"], angle_fix["lon"])
+        self.assertGreater(err_bearing, 1.0,
+                           "a 3 deg heading bias should wreck a bearing fix")
+        self.assertLess(err_angle, 0.2,
+                        f"horizontal angles must be compass-free "
+                        f"(got {err_angle*1000:.0f} m)")
+        self.assertLess(err_angle, err_bearing)
+
+    def test_elevation_factor_gives_a_range_and_is_compass_free(self):
+        from imu_fusion.terrain_factors import (solve_landmark_fix,
+                                                synthesize_measurements)
+        from imu_fusion.astro import great_circle_km
+        lms = self._landmarks()
+        b, e, a = synthesize_measurements(self.LAT0, self.LON0, lms,
+                                          heading_bias_deg=5.0)
+        fix = solve_landmark_fix(
+            elevations=[(lm, m, 0.05) for lm, m in e],
+            lat0=self.LAT0, lon0=self.LON0,
+            prior_en_m=(800.0, 800.0), prior_sigma_km=30.0)
+        err = great_circle_km(self.LAT0, self.LON0, fix["lat"], fix["lon"])
+        self.assertLess(err, 1.0)                    # ranges alone locate it
+        self.assertTrue(fix["sigma_km"] == fix["sigma_km"])   # covariance exists
+
+    def test_fix_reports_covariance(self):
+        from imu_fusion.terrain_factors import (solve_landmark_fix,
+                                                synthesize_measurements)
+        lms = self._landmarks()
+        b, e, a = synthesize_measurements(self.LAT0, self.LON0, lms)
+        fix = solve_landmark_fix(
+            horizontal_angles=[(x, y, m, 0.05) for x, y, m in a],
+            elevations=[(lm, m, 0.1) for lm, m in e],
+            lat0=self.LAT0, lon0=self.LON0, prior_sigma_km=30.0)
+        self.assertIsNotNone(fix["cov_en"])
+        self.assertGreater(fix["sigma_km"], 0.0)
+        self.assertLess(fix["sigma_km"], 30.0)       # sharper than the prior
+
+    def test_jacobians_are_finite_and_position_only(self):
+        ''' Linearising each factor must give a finite Jacobian that is non-zero
+            only on the (east, north) translation columns. '''
+        import numpy as np
+        from imu_fusion.terrain_factors import (Landmark,
+                                                landmark_bearing_factor,
+                                                landmark_elevation_factor,
+                                                landmark_horizontal_angle_factor)
+        X = gtsam.symbol_shorthand.X
+        lm1 = Landmark("A", 36.90, 27.20, 900.0)
+        lm2 = Landmark("B", 36.94, 27.45, 850.0)
+        pose = gtsam.Pose3(gtsam.Rot3(), gtsam.Point3(400.0, -250.0, 0.0))
+        vals = gtsam.Values(); vals.insert(X(0), pose)
+        for f in (landmark_bearing_factor(X(0), lm1, 210.0, 1.0, self.LAT0, self.LON0),
+                  landmark_elevation_factor(X(0), lm1, 2.0, 0.1, self.LAT0, self.LON0),
+                  landmark_horizontal_angle_factor(X(0), lm1, lm2, 30.0, 0.1,
+                                                   self.LAT0, self.LON0)):
+            A, _ = f.linearize(vals).jacobian()
+            self.assertTrue(np.all(np.isfinite(A)))
+            self.assertAlmostEqual(float(A[0, 0]), 0.0, places=9)   # rotation
+            self.assertAlmostEqual(float(A[0, 5]), 0.0, places=9)   # up
+            self.assertGreater(abs(A[0, 3]) + abs(A[0, 4]), 0.0)    # east/north
+
+
 if __name__ == "__main__":
     unittest.main()
