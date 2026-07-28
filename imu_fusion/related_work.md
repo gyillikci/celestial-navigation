@@ -77,8 +77,68 @@ Read the algorithms; do not link the code.
 | [ayushmankumar7/TERCOM-python](https://github.com/ayushmankumar7/TERCOM-python) | **no licence file** | TERCOM + DSMAC via OpenCV |
 | [smarc-project/UWExploration](https://github.com/smarc-project/UWExploration) | **no licence file** | Underwater exploration stack |
 | [tombh/total-viewsheds](https://github.com/tombh/total-viewsheds) | **no licence file** | Cache-efficient total viewshed, CPU SIMD + GPU |
+| [TouqeerAhmad/skyline_detection](https://github.com/TouqeerAhmad/skyline_detection) | **BSD-like but NON-COMMERCIAL, source-form only** | Mountainous skyline extraction. Looks permissive, clause 3 forbids commercial use — see the horizon section below |
 
 Four of five TERCOM repositories found have no licence at all.
+
+---
+
+## Horizon- and skyline-based navigation specifically
+
+The closest field to what this project does, searched separately. **The
+conclusion is that there is no usable open-source horizon-based *localisation*
+system** — the technique exists in papers, in shipped products, and in patents,
+but not in code you can build on.
+
+### The one on-target repository, and its licence trap
+
+[TouqeerAhmad/skyline_detection](https://github.com/TouqeerAhmad/skyline_detection)
+— *Resource Efficient Mountainous Skyline Extraction using Shallow Learning*,
+IJCNN 2021. Structure-tensor-selected linear filters plus dynamic programming
+(shortest path through a multistage graph) to find the sky/mountain boundary.
+Explicitly targeted at **resource-constrained platforms: mobile phones,
+planetary rovers, UAVs** — i.e. exactly our deployment target, and exactly the
+skyline-extraction stage that is the weakest link in our real-photo results.
+
+**Its licence looks permissive and is not.** It opens
+`Copyright (c) 2021 Touqeer Ahmad. All rights reserved.` and then reads like
+BSD, but:
+
+- **clause 3**: redistribution is *"permitted only for non-commercial research
+  collaboration and demonstration purposes"* — **not** open source in the usual
+  sense;
+- it grants **source-form redistribution only** (there is no binary clause),
+  which is a further problem for a compiled iOS app.
+
+So: **read the paper, reimplement the algorithm, do not ship the code.** The
+method is simple enough to reimplement from the paper in Accelerate or Metal,
+which is the recommended path.
+
+### What exists only as papers, products or patents
+
+| Work | What it is | Available as |
+|---|---|---|
+| **PeakLens** | FCN skyline extraction aligned against a DEM panorama from GPS + compass — architecturally the same as ours, shipped on Android | product, no source found |
+| **CMLocate** (Liu et al., IET IP 2023) | DEM-rendered skyline database + segmentation + CNN matching; **49 m** mean error over 203 km² | paper |
+| Baatz et al., ECCV 2012 | Large-scale visual geo-localisation in mountainous terrain | paper |
+| PFG 2020 | Improving **azimuth** by skyline matching — matches our finding that skylines fix heading far better than position | paper |
+| US 9165217 / 9292766 | Ground-level photo geolocation using digital elevation | **patents** |
+| US 8311285 | Localising in urban environments from omni-directional skyline images | **patent** |
+
+The patent coverage is worth noting before this becomes a product; it is outside
+what this study can assess.
+
+### Consequence for this project
+
+The two stages need different sourcing:
+
+- **Skyline extraction from the photo** — reimplement the IJCNN shallow-learning
+  + dynamic-programming approach, or use Vision / Core ML segmentation. This is
+  the stage most likely to improve the real-photo numbers, since the panorama
+  registration and extraction (not the DEM) were diagnosed as the limit in
+  `terrain_resection.py`'s docstring.
+- **Skyline → position** — `terrain_resection.py` + `terrain_factors.py`. There
+  is nothing off-the-shelf to adopt.
 
 ---
 
