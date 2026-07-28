@@ -226,6 +226,120 @@ def compare_reference_csv(path: str):
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Validation of the APPARENT-altitude corrections (refraction + parallax).
+# The ephemeris check above uses purely geometric altitudes so the corrections
+# cannot confound it; here we check the corrections themselves against
+# independent witnesses: IAU ERFA `refco` for refraction, and astropy's
+# topocentric AltAz (refracted) for the full apparent altitude.
+# --------------------------------------------------------------------------- #
+
+def compare_refraction(alts=(80, 60, 45, 30, 20, 15, 12),
+                       temperature_c=10.0, pressure_kpa=101.0, humidity_pct=50.0):
+    ''' Residuals (arc-minutes) of the study's Bennett refraction
+        (`corrections.refraction_deg`) against IAU ERFA `refco`, over a grid of
+        altitudes.  ERFA's two-term series is reliable away from the horizon, so
+        the grid stops at ~12 deg.  Returns [] if pyerfa is unavailable. '''
+    try:
+        import erfa
+    except Exception:
+        return []
+    from math import tan, radians, degrees
+    from .corrections import refraction_deg
+    refa, refb = erfa.refco(pressure_kpa * 10.0, temperature_c,
+                            humidity_pct / 100.0, 0.55)     # hPa, C, frac, micron
+    out = []
+    for alt in alts:
+        z = radians(90.0 - alt)
+        erfa_am = degrees(refa * tan(z) + refb * tan(z) ** 3) * 60.0
+        mine_am = refraction_deg(alt, temperature_c, pressure_kpa, humidity_pct) * 60.0
+        out.append(dict(alt=alt, mine_am=mine_am, erfa_am=erfa_am,
+                        resid_am=mine_am - erfa_am))
+    return out
+
+
+def _astropy_apparent(body, dt, lat, lon,
+                      temperature_c=10.0, pressure_kpa=101.0, humidity_pct=50.0):
+    ''' (apparent_alt, geom_topo_alt, az) in degrees from astropy's topocentric
+        AltAz -- an independent refraction+parallax witness.  geom_topo is with
+        pressure=0 (parallax only, no refraction). '''
+    import warnings
+    import astropy.units as u
+    from astropy.coordinates import EarthLocation, AltAz, get_body
+    from astropy.time import Time
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        t = Time(dt.astimezone(timezone.utc).replace(tzinfo=None), scale="utc")
+        loc = EarthLocation(lat=lat * u.deg, lon=lon * u.deg, height=0 * u.m)
+        b = get_body("moon" if body.lower() == "moon" else "sun", t, loc)
+        app = b.transform_to(AltAz(obstime=t, location=loc,
+                                   pressure=pressure_kpa * 10.0 * u.hPa,
+                                   temperature=temperature_c * u.deg_C,
+                                   relative_humidity=humidity_pct / 100.0,
+                                   obswl=0.55 * u.micron))
+        geo = b.transform_to(AltAz(obstime=t, location=loc, pressure=0 * u.hPa))
+        return app.alt.deg, geo.alt.deg, app.az.deg
+
+
+def compare_apparent(times, locations=((40.0, -5.0),), bodies=("Moon", "Sun"),
+                     temperature_c=10.0, pressure_kpa=101.0):
+    ''' Residuals (arc-minutes) of the study's apparent altitude
+        (`astro.predicted_altitude` reduced by `corrections.apparent_from_
+        geometric`) against astropy's topocentric refracted AltAz, over a grid.
+
+        Only samples with a well-conditioned altitude (> 8 deg, away from the
+        horizon where models diverge) are kept.  Returns {} if astropy is
+        unavailable.  The residual folds in the model AND the geocentric-vs-
+        geodetic figure-of-Earth difference, so it is a holistic witness, not a
+        pure model error. '''
+    try:
+        import astropy  # noqa: F401
+    except Exception:
+        return {}
+    from .astro import body_distance_km
+    from .corrections import apparent_from_geometric
+    out = {b: {"app_am": [], "refr_am": []} for b in bodies}
+    for dt in times:
+        iso = _iso(dt)
+        for b in bodies:
+            gp = body_gp(b, iso)
+            dist = body_distance_km(b, iso)
+            for lat, lon in locations:
+                geo_geoc = predicted_altitude(lat, lon, gp)
+                if geo_geoc < 8.0:
+                    continue
+                mine_app = apparent_from_geometric(geo_geoc, dist,
+                                                   temperature_c, pressure_kpa)
+                ap_app, ap_geo, _ = _astropy_apparent(b, dt, lat, lon,
+                                                      temperature_c, pressure_kpa)
+                out[b]["app_am"].append((mine_app - ap_app) * 60.0)
+                # astropy's own refraction (apparent - no-pressure), for context:
+                out[b]["refr_am"].append((ap_app - ap_geo) * 60.0)
+    return out
+
+
+def summarise_corrections(refr, app) -> str:
+    def rms(v):
+        return (sum(x * x for x in v) / len(v)) ** 0.5 if v else float("nan")
+
+    def mx(v):
+        return max(abs(x) for x in v) if v else float("nan")
+    lines = []
+    if refr:
+        worst = max(abs(r["resid_am"]) for r in refr)
+        lines.append(f"Refraction (Bennett) vs ERFA refco: max |Δ| = {worst:.3f}' "
+                     f"over alts {refr[0]['alt']}..{refr[-1]['alt']} deg")
+    if app:
+        lines.append("Apparent altitude vs astropy topocentric AltAz "
+                     "(refraction+parallax+figure-of-Earth):")
+        for b, d in app.items():
+            if d["app_am"]:
+                lines.append(f"  {b:5}  Δapparent rms={rms(d['app_am']):.3f}' "
+                             f"max={mx(d['app_am']):.3f}'  "
+                             f"(astropy refraction seen {rms(d['refr_am']):.3f}' rms)")
+    return "\n".join(lines) if lines else "(no correction witnesses available)"
+
+
 def default_grid(n_days=60, step_hours=7):
     ''' A grid of UTC times spanning part of the almanac's 2024-2030 range. '''
     from datetime import timedelta
@@ -239,5 +353,8 @@ if __name__ == "__main__":
         print("No independent ephemeris engine available "
               "(install astropy, or place a JPL .bsp for skyfield).")
     else:
-        res = compare(default_grid())
-        print(summarise(res))
+        grid = default_grid()
+        print(summarise(compare(grid)))
+        print()
+        print(summarise_corrections(compare_refraction(),
+                                    compare_apparent(grid)))

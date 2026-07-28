@@ -619,5 +619,90 @@ class TestImuFusion(unittest.TestCase):
             self.assertLess(dec_max, 60.0, f"{body} Dec residual {dec_max:.1f}\"")
 
 
+try:
+    from imu_fusion import corrections as _C
+    from imu_fusion.astro import body_gp as _body_gp, body_distance_km as _dist, \
+        predicted_altitude as _palt, gp_dec_gha as _gpdg
+    _HAVE_CORR = True
+except Exception:                               # pragma: no cover
+    _HAVE_CORR = False
+
+
+@unittest.skipUnless(_HAVE_CORR, "starfix / corrections not importable")
+class TestCorrections(unittest.TestCase):
+    ''' The apparent-altitude corrections (refraction + topocentric parallax)
+        that bridge the study's geometric geocentric altitudes to what a phone
+        actually measures.  These mirror the Swift port and are validated against
+        IAU ERFA / astropy when those are installed. '''
+
+    MEAN_MOON_KM = 384400.0
+
+    def test_parallax_zero_at_zenith_max_at_horizon(self):
+        p_zen = _C.parallax_in_altitude_deg(90.0, self.MEAN_MOON_KM)
+        p_hor = _C.parallax_in_altitude_deg(0.0, self.MEAN_MOON_KM)
+        hp = _C.horizontal_parallax_deg(self.MEAN_MOON_KM)
+        self.assertAlmostEqual(p_zen, 0.0, places=6)
+        self.assertAlmostEqual(p_hor, hp, places=6)          # horizon parallax == HP
+        self.assertTrue(0.9 < hp < 1.0)                      # Moon HP ~57'
+
+    def test_refraction_positive_decreasing_zeroing(self):
+        r_hor = _C.refraction_deg(0.5)
+        r_mid = _C.refraction_deg(30.0)
+        r_zen = _C.refraction_deg(90.0)
+        self.assertGreater(r_hor, r_mid)                     # bigger low down
+        self.assertGreater(r_mid, r_zen)
+        self.assertAlmostEqual(r_zen, 0.0, places=3)         # ~0 at the zenith
+        self.assertTrue(0.4 < r_hor < 0.7)                   # ~30-40' near horizon
+
+    def test_roundtrip_apparent_geometric(self):
+        for dist in (356500.0, 384400.0, 406700.0):
+            for geo in (8.0, 20.0, 45.0, 70.0, 88.0):
+                app = _C.apparent_from_geometric(geo, dist)
+                back = _C.geometric_from_apparent(app, dist)
+                self.assertAlmostEqual(back, geo, places=6,
+                                       msg=f"roundtrip d={dist} geo={geo}")
+
+    def test_moon_net_negative_sun_net_small(self):
+        # Moon at low altitude: parallax dominates -> apparent well BELOW geometric.
+        net_moon = _C.total_correction_deg(15.0, self.MEAN_MOON_KM)
+        self.assertLess(net_moon, -0.7)
+        # Sun: negligible parallax, small positive refraction lift.
+        net_sun = _C.total_correction_deg(15.0, 1.495978707e8)
+        self.assertTrue(0.0 < net_sun < 0.1)
+
+    def test_refraction_matches_erfa(self):
+        from imu_fusion import validate_ephemeris as V
+        rows = V.compare_refraction()
+        if not rows:
+            self.skipTest("pyerfa not available")
+        worst = max(abs(r["resid_am"]) for r in rows)
+        self.assertLess(worst, 0.15, f"Bennett vs ERFA max {worst:.3f}'")
+
+    def test_apparent_matches_astropy(self):
+        from imu_fusion import validate_ephemeris as V
+        if V.ENGINE is None:
+            self.skipTest("no independent ephemeris engine")
+        app = V.compare_apparent(V.default_grid(n_days=20, step_hours=12))
+        if not app or not any(app[b]["app_am"] for b in app):
+            self.skipTest("astropy AltAz witness unavailable")
+        for b, d in app.items():
+            if not d["app_am"]:
+                continue
+            mx = max(abs(x) for x in d["app_am"])
+            self.assertLess(mx, 0.5, f"{b} apparent-alt residual {mx:.3f}'")
+
+    def test_golden_vectors_self_consistent(self):
+        ''' The exported goldens must be reproducible by the same formulas the
+            Swift port implements (guards the generator and the Swift target). '''
+        from imu_fusion.export_golden import build_records
+        recs = build_records()
+        self.assertGreaterEqual(len(recs), 4)
+        for r in recs:
+            app = _C.apparent_from_geometric(r["geometricAltDeg"], r["distanceKm"])
+            self.assertAlmostEqual(app, r["apparentAltDeg"], places=5)
+            back = _C.geometric_from_apparent(r["apparentAltDeg"], r["distanceKm"])
+            self.assertAlmostEqual(back, r["geometricAltDeg"], places=5)
+
+
 if __name__ == "__main__":
     unittest.main()

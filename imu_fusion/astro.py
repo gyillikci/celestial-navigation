@@ -69,6 +69,25 @@ def body_gp(object_name: str, time_iso: str) -> LatLonGeocentric:
     return gp
 
 
+def body_distance_km(object_name: str, time_iso: str) -> float:
+    ''' Distance to a body (km) at a UTC time, from the SAME validated almanac.
+
+        The Moon's distance is recovered from its almanac horizontal parallax
+        (sin HP = R_earth / d) -- the authoritative, JPL-derived value the study
+        already trusts.  The Sun is treated at its mean distance (its parallax,
+        ~8.8", is negligible for the altitude corrections).  The distance feeds
+        the topocentric-parallax and semidiameter models in `corrections.py`; the
+        device carries the equivalent value in its own ephemeris.
+    '''
+    name = object_name.lower()
+    if name == "moon":
+        from starfix import get_mr_item, parse_angle_string, ObsTypes
+        hour_iso = time_iso[:13] + ":00:00"
+        hp_deg = parse_angle_string(get_mr_item("moon", hour_iso, ObsTypes.HP))
+        return EARTH_RADIUS / sin(radians(hp_deg))
+    return 1.495978707e8            # Sun mean distance (km)
+
+
 def gp_dec_gha(gp: LatLonGeocentric) -> tuple[float, float]:
     ''' Decompose a GP into (declination, Greenwich hour angle) in degrees.
 
