@@ -791,5 +791,43 @@ class TestStellariumSource(unittest.TestCase):
             self.assertTrue(-29 < gp.get_lat() < 29)        # sane Dec from starfix
 
 
+@unittest.skipUnless(_HAVE, "starfix / numpy not installed")
+class TestMissionPlan(unittest.TestCase):
+    ''' Route sky-forecast used for mission planning (Istanbul -> Ankara). '''
+
+    def test_leg_geometry(self):
+        from imu_fusion.mission_plan import ISTANBUL_ANKARA as leg
+        self.assertTrue(300 < leg.distance_km < 400)          # ~350 km
+        a = leg.position_at(0.0)
+        b = leg.position_at(1.0)
+        self.assertAlmostEqual(a[0], leg.lat_a, places=6)
+        self.assertAlmostEqual(b[1], leg.lon_b, places=6)
+        mid = leg.position_at(0.5)                            # between the ends
+        self.assertTrue(min(leg.lat_a, leg.lat_b) <= mid[0] <= max(leg.lat_a, leg.lat_b))
+        self.assertTrue(min(leg.lon_a, leg.lon_b) <= mid[1] <= max(leg.lon_a, leg.lon_b))
+
+    def test_two_lop_sigma_degenerates_at_small_crossing_angle(self):
+        from imu_fusion.mission_plan import two_lop_sigma_km
+        good = two_lop_sigma_km(90.0, 2.0)
+        poor = two_lop_sigma_km(10.0, 2.0)
+        self.assertLess(good, poor)                           # 90 deg is best
+        self.assertAlmostEqual(good, 2.0 * 1.852 * (2 ** 0.5), places=6)
+        self.assertEqual(two_lop_sigma_km(0.0, 2.0), float("inf"))   # parallel LOPs
+
+    def test_forecast_reports_both_bodies_and_corrections(self):
+        from datetime import datetime, timezone
+        from imu_fusion.mission_plan import ISTANBUL_ANKARA as leg, forecast_leg
+        rows = forecast_leg(leg, datetime(2026, 8, 18, 12, tzinfo=timezone.utc),
+                            n_points=3)
+        self.assertEqual(len(rows), 3)
+        for r in rows:
+            self.assertTrue(-90 <= r["sun_alt"] <= 90)
+            self.assertTrue(0 <= r["sun_az"] < 360)
+            self.assertTrue(-180 <= r["daz"] <= 180)
+            # the Moon's parallax is the dominant correction when it is up
+            if r["moon_alt"] > 5:
+                self.assertGreater(r["moon_parallax_deg"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
