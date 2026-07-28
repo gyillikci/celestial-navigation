@@ -1780,7 +1780,9 @@ fused attitude references — IMU gravity, ultrawide optical horizon and
 tele-disk orientation.</p>
 <figure><img src='results/fig_factorgraph.png'><figcaption>Variables
 (circles) and factors (squares): priors, IMU links, and the celestial lines of
-position.</figcaption></figure>
+position. <b><a href="graph_viewer.html" style="color:var(--acc)">Explore the live,
+interactive factor graph →</a></b> (drag nodes, toggle factor types, and scrub the
+timeline to watch it grow shot-by-shot and marginalise old keyframes).</figcaption></figure>
 <table><tr><th>Regime</th><th>full fusion</th>
 <th>− ultrawide</th><th>− IMU</th><th>− opt. az</th><th>− parallactic</th>
 <th>− Δq(☉−☾)</th><th>− gating</th><th>− Moon</th></tr>
@@ -1967,6 +1969,11 @@ def main():
     plot_ellipse(os.path.join(OUT, "fig_ellipse.png"))
     write_results_md(data, os.path.join(HERE, "RESULTS.md"))
     write_dashboard(data, os.path.join(HERE, "dashboard.html"))
+    # Interactive + animated viewer of the REAL factor graph.
+    from .graph_export import graph_structure, write_graph_viewer
+    gsc = build_scenario("sea", random.Random(0), n_shots=6, **FULL_SC)
+    write_graph_viewer(graph_structure(gsc, lag_s=30.0),
+                       os.path.join(HERE, "graph_viewer.html"))
     print("Done. See imu_fusion/RESULTS.md and imu_fusion/results/.")
     for r in REGIMES:
         mm = data["main"][r]

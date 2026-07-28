@@ -269,6 +269,35 @@ class TestImuFusion(unittest.TestCase):
                     use_parallactic=True)["rms_err_km"]
         self.assertLess(rms, 0.5)                       # no translation bias
 
+    def test_graph_export_matches_real_graph(self):
+        ''' The exported graph structure (for the interactive viewer) has exactly
+            the same factor count and variable ids as the real GTSAM graph, so the
+            visualisation cannot drift from what is actually solved. '''
+        from imu_fusion.graph_export import graph_structure, write_graph_viewer
+        sc = build_scenario("sea", random.Random(0), n_shots=5,
+                            horizon_mode="fused", use_azimuth=True,
+                            heading_source="optical", use_parallactic=True,
+                            sun_spots=True)
+        st = graph_structure(sc, lag_s=30.0, validate=True)   # asserts internally
+        ids = {n["id"] for n in st["nodes"]}
+        for f in st["factors"]:                                # edges are valid
+            for v in f["vars"]:
+                self.assertIn(v, ids)
+        # the horizon-free differential appears once per resolved keyframe
+        ndiff = sum(1 for f in st["factors"] if f["type"] == "diff")
+        self.assertEqual(ndiff, sum(1 for kf in sc.keyframes if kf.diff_valid))
+        # marginalisation is causal (a factor leaves the window after it enters)
+        for f in st["factors"]:
+            if f["marg"] is not None:
+                self.assertGreater(f["marg"], f["step"])
+        # the HTML renders self-contained (no external hosts, data injected)
+        import tempfile, os
+        p = os.path.join(tempfile.mkdtemp(), "g.html")
+        write_graph_viewer(st, p)
+        html = open(p).read()
+        self.assertNotIn("__DATA__", html)
+        self.assertNotIn("http://", html.replace("http://www.w3.org/2000/svg", ""))
+
     def test_analytic_altitude_jacobian(self):
         ''' The closed-form altitude Jacobian matches central finite diff. '''
         import numpy as np
