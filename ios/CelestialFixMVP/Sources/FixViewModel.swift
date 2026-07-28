@@ -10,13 +10,16 @@ public final class FixViewModel: ObservableObject {
 
     public struct Result {
         public let fix: Fix
-        public let measAltDeg: Double
+        public let measAltDeg: Double        // geometric geocentric (used in the fix)
+        public let apparentAltDeg: Double    // as measured, before reduction
         public let sigmaAltDeg: Double
         public let radiusPx: Double
         public let arcsecPerPixel: Double
         public let rmsePx: Double
         public let time: Date
         public let moon: GeographicPosition
+        /// apparent − geometric (deg): net of refraction (up) and parallax (down).
+        public var correctionDeg: Double { apparentAltDeg - measAltDeg }
     }
 
     @Published public var status: String = "Point the tele camera at the Moon, then Capture."
@@ -62,10 +65,17 @@ public final class FixViewModel: ObservableObject {
         let arcsecPerPx = DiskMetrology.arcsecPerPixel(radiusPx: fit.radiusPx,
                                                        moonAngularRadiusArcsec: angRadius)
         let principal = SIMD2<Double>(Double(img.width) / 2, Double(img.height) / 2)
-        let measAlt = CelestialMath.altitudeSightDeg(
+        // The disk is measured through the atmosphere from the surface: this is
+        // the APPARENT altitude.  Reduce it to the geometric geocentric altitude
+        // (remove refraction, add back parallax) that the navigation triangle
+        // uses — for the Moon this parallax term is ~0.5–1°, the biggest single
+        // correction in the budget.
+        let apparentAlt = CelestialMath.altitudeSightDeg(
             gravityDevice: gravity,
             moonCentrePx: SIMD2<Double>(fit.cx, fit.cy),
             principalPx: principal, arcsecPerPixel: arcsecPerPx)
+        let measAlt = CelestialMath.geometricFromApparent(
+            apparentAltDeg: apparentAlt, distanceKm: moon.distanceKm)
         let sigmaAlt = CelestialMath.altitudeSigmaDeg(arcsecPerPixel: arcsecPerPx)
 
         let fix = PositionFix.solve(
@@ -73,7 +83,8 @@ public final class FixViewModel: ObservableObject {
             sigmaAltDeg: sigmaAlt,
             priorLatDeg: priorLat, priorLonDeg: priorLon, priorSigmaKm: priorSigmaKm)
 
-        result = Result(fix: fix, measAltDeg: measAlt, sigmaAltDeg: sigmaAlt,
+        result = Result(fix: fix, measAltDeg: measAlt, apparentAltDeg: apparentAlt,
+                        sigmaAltDeg: sigmaAlt,
                         radiusPx: fit.radiusPx, arcsecPerPixel: arcsecPerPx,
                         rmsePx: fit.rmsePx, time: now, moon: moon)
         status = String(format: "Fix: %.4f°, %.4f°  (±%.1f km, 1σ)",

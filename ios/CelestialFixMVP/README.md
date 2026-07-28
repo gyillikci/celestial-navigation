@@ -22,13 +22,19 @@ map below for where each one lands.
   mirrors the validated Python in `imu_fusion/`, but Swift compile errors,
   CoreMotion axis conventions, and camera behaviour must be shaken out **on the
   device**. The `Tests/` target (⌘U) is the first thing to run.
-- **Low-precision ephemeris.** `MoonEphemeris.swift` is a *truncated* Meeus
-  ch.47 lunar theory — good to a **few arc-minutes** (≈ a few km on the ground),
-  enough to demonstrate the pipeline, **not** the arc-second ephemeris the
-  production app needs (port `imu_fusion/astro.py` / `starfix`, cross-checked by
-  `validate_ephemeris.py`). It is also **geocentric** — no topocentric parallax
-  correction, which for the Moon is up to ~1° and *dominates* the error budget.
-  This MVP is a plumbing demo, not a navigation instrument.
+- **Refraction + topocentric parallax ARE applied** (`CelestialMath.swift`,
+  ported from `imu_fusion/corrections.py`): Bennett refraction and exact parallax
+  from the Moon's distance — the ~0.5–1° parallax that used to dominate the
+  budget is now removed. These transforms are validated against IAU ERFA and
+  astropy to **sub-arcminute** in `validate_ephemeris.py`, and the Swift port is
+  checked against the exported `GoldenVectors.swift` in the test target.
+- **Low-precision ephemeris — the remaining accuracy gap.** `MoonEphemeris.swift`
+  is still a *truncated* Meeus ch.47 lunar theory — good to a **few arc-minutes**
+  (≈ a few km on the ground), enough to demonstrate the pipeline, **not** the
+  arc-second ephemeris the production app needs. The next step swaps it for a
+  compact table baked from the validated `imu_fusion/astro.py` / `starfix`
+  pipeline (cross-checked by `validate_ephemeris.py`). Until then this MVP is a
+  plumbing demo, not a navigation instrument.
 - **One sight + a prior, not a redundant fix.** A single altitude line is
   under-determined; the GPS/last-known **prior** pins the along-line direction.
   So the reported covariance is honestly bounded by the prior. Two bodies (Sun +
@@ -102,6 +108,7 @@ principal point.
 |------------------------------------------------------|---------------------------------|---------------|
 | `disk_metrology.py` (sub-pixel limb, full circle)    | `Sources/DiskMetrology.swift`   | ported (CPU; gradient refine only, threshold seed) |
 | `astro.py` predicted altitude/azimuth                | `Sources/CelestialMath.swift`   | ported |
+| `corrections.py` refraction + parallax + SD          | `Sources/CelestialMath.swift`   | ported, golden-checked |
 | `astro.py` / `starfix` ephemeris                     | `Sources/MoonEphemeris.swift`   | **truncated** stand-in (few-arcmin, geocentric) |
 | `celestial_factor_graph.py` intercept-method LOP     | `Sources/PositionFix.swift`     | 2-DOF hand-rolled GN (GTSAM replaces at scale) |
 | `iphone_model.py` synthetic horizon (gravity)        | `CelestialMath.altitudeSightDeg`, `CaptureController.gravity` | ported |

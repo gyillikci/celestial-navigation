@@ -61,7 +61,8 @@ struct ContentView: View {
                 }
                 .frame(height: 140).clipShape(RoundedRectangle(cornerRadius: 10))
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 3) {
-                    row("Moon altitude", String(format: "%.3f° ± %.3f°", r.measAltDeg, r.sigmaAltDeg))
+                    row("Moon alt (geometric)", String(format: "%.3f° ± %.3f°", r.measAltDeg, r.sigmaAltDeg))
+                    row("Refr+parallax", String(format: "%+.3f°  (app %.3f°)", r.correctionDeg, r.apparentAltDeg))
                     row("Plate scale", String(format: "%.2f″/px  (R=%.0f px)", r.arcsecPerPixel, r.radiusPx))
                     row("Limb fit RMSE", String(format: "%.3f px", r.rmsePx))
                     row("Fix 1σ (major)", String(format: "%.1f km", r.fix.oneSigmaMajorKm))

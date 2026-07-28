@@ -81,4 +81,80 @@ public enum CelestialMath {
         let centroidDeg = centroidPx * arcsecPerPixel / 3600.0
         return (tiltFloorDeg * tiltFloorDeg + centroidDeg * centroidDeg).squareRoot()
     }
+
+    // MARK: Apparent-altitude corrections (refraction + topocentric parallax)
+    //
+    // Port of imu_fusion/corrections.py — the SINGLE SOURCE OF TRUTH, validated
+    // against IAU ERFA / astropy (sub-arcminute) and checked here against the
+    // exported golden vectors.  A phone measures the APPARENT altitude of the
+    // disk centre (light refracted up; observer topocentric, so a near body is
+    // seen lower by parallax).  `predictedAltitude` and PositionFix work in
+    // GEOMETRIC GEOCENTRIC altitudes, so a sight is reduced before the fix.
+    //
+    //   measured apparent --(- refraction)--> topocentric --(+ parallax)--> geocentric
+    //
+    // Uses the study's Earth radius so the golden vectors reproduce exactly.
+
+    /// Earth radius (km) — matches starfix.EARTH_RADIUS (circumference / 2π).
+    static let earthRadiusKm = 6374.574260537331
+
+    /// Equatorial horizontal parallax (deg): sin(HP) = R_earth / distance.
+    public static func horizontalParallaxDeg(distanceKm: Double) -> Double {
+        deg(asin(earthRadiusKm / distanceKm))
+    }
+
+    /// Parallax in altitude (deg) at a geometric altitude: asin(sin HP · cos alt).
+    public static func parallaxInAltitudeDeg(geometricAltDeg: Double,
+                                             distanceKm: Double) -> Double {
+        let hp = rad(horizontalParallaxDeg(distanceKm: distanceKm))
+        let c = max(-1.0, min(1.0, sin(hp) * cos(rad(geometricAltDeg))))
+        return deg(asin(c))
+    }
+
+    /// Atmospheric refraction (deg), Bennett's formula on the APPARENT altitude.
+    /// Mirrors starfix.get_refraction (arc-minutes). Defaults: 10°C, 101 kPa, 50%.
+    public static func refractionDeg(apparentAltDeg h: Double,
+                                     temperatureC: Double = 10.0,
+                                     pressureKpa: Double = 101.0,
+                                     humidityPct: Double = 50.0) -> Double {
+        if h <= -1.0 { return 0.0 }
+        let d = (h + 7.31 / (h + 4.4)) * .pi / 180.0
+        let humidityFactor = 1.0 - 0.0000008 * humidityPct * temperatureC
+        let arcmin = (1.0 / tan(d)) * (pressureKpa / 101.0)
+                     * (283.0 / (273.0 + temperatureC)) * humidityFactor
+        return arcmin / 60.0
+    }
+
+    /// Reduce a MEASURED apparent altitude to the geometric geocentric altitude
+    /// that `predictedAltitude` / PositionFix expects. Applied to every sight.
+    public static func geometricFromApparent(apparentAltDeg: Double, distanceKm: Double,
+                                             temperatureC: Double = 10.0,
+                                             pressureKpa: Double = 101.0,
+                                             humidityPct: Double = 50.0) -> Double {
+        let topo = apparentAltDeg - refractionDeg(apparentAltDeg: apparentAltDeg,
+                                                  temperatureC: temperatureC,
+                                                  pressureKpa: pressureKpa,
+                                                  humidityPct: humidityPct)
+        return topo + parallaxInAltitudeDeg(geometricAltDeg: topo, distanceKm: distanceKm)
+    }
+
+    /// Forward model: predict the apparent altitude from the geometric geocentric
+    /// altitude. Exact inverse of `geometricFromApparent` (used by the golden test).
+    public static func apparentFromGeometric(geocentricAltDeg: Double, distanceKm: Double,
+                                             temperatureC: Double = 10.0,
+                                             pressureKpa: Double = 101.0,
+                                             humidityPct: Double = 50.0) -> Double {
+        var topo = geocentricAltDeg
+            - parallaxInAltitudeDeg(geometricAltDeg: geocentricAltDeg, distanceKm: distanceKm)
+        for _ in 0..<3 {
+            topo = geocentricAltDeg
+                - parallaxInAltitudeDeg(geometricAltDeg: topo, distanceKm: distanceKm)
+        }
+        var app = topo
+        for _ in 0..<4 {
+            app = topo + refractionDeg(apparentAltDeg: app, temperatureC: temperatureC,
+                                       pressureKpa: pressureKpa, humidityPct: humidityPct)
+        }
+        return app
+    }
 }
