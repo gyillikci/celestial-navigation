@@ -1173,7 +1173,7 @@ def write_results_md(data, path):
     # ------- one phone: sequential shots -------
     it = data.get("intershot")
     if it:
-        g = it["gaps"]
+        gap_list = it["gaps"]
         L.append("## One phone → sequential shots: how long a slew can you "
                  "afford?\n")
         L.append("The horizon-free **Δq(Sun−Moon)** line needs *both* disks, but "
@@ -1187,7 +1187,7 @@ def write_results_md(data, path):
         L.append("| Slew gap | Δq σ | " +
                  " | ".join(REGIME_LABEL[r] + " fix" for r in REGIMES) + " |")
         L.append("|---|---|" + "---|" * len(REGIMES))
-        for i, gg in enumerate(g):
+        for i, gg in enumerate(gap_list):
             L.append(f"| {gg:.0f} s | {it['air']['diff_sigma_deg'][i]:.2f}° | " +
                      " | ".join(cell(it[r]['rms'][i]) for r in REGIMES) + " |")
         L.append("\n![intershot](results/fig_intershot.png)\n")

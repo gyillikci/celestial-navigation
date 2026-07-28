@@ -32,6 +32,23 @@ Where does the fix error come from, and what does measuring the **Sun–Moon ang
 
 **Reading it.** The two altitude sights are the workhorses — a ~5 km single-epoch fix, driven down to the headline few-km numbers by fusing many gated shots. The **elongation is a poor _direct_ position line** (it barely changes with where you stand — only lunar parallax moves it), **but a strong _time_ observable**: the Moon slides ~0.5°/hr against the Sun, so measuring the separation to a few arc-minutes fixes UTC to minutes and hence longitude — the classic *lunar-distance* method. That is exactly the lever when a photo's timestamp is missing: the sky itself carries the clock.
 
+## One phone → sequential shots: how long a slew can you afford?
+
+The horizon-free **Δq(Sun−Moon)** line needs *both* disks, but with a single phone you shoot the Sun, then slew ~94° and shoot the Moon a few seconds later. The Moon shot is dead-reckoned (the factor advances it by your known velocity × gap, so the translation — 0 on land, ~0.6 km/s in the air — is removed), and each disk keeps its own timestamp. What is left is the **gyro carrying the vertical across the slew**: that roll-carry error grows ~√gap and is what erodes the horizon-free purity.
+
+| Slew gap | Δq σ | Land (stationary) fix | Sea (vessel + swell) fix | Air (aircraft) fix |
+|---|---|---|---|---|
+| 0 s | 0.13° | 2.0 ± 1.2 | 5.0 ± 1.8 | 3.1 ± 1.5 |
+| 2 s | 0.14° | 2.0 ± 1.2 | 5.1 ± 1.8 | 3.1 ± 1.5 |
+| 5 s | 0.14° | 2.0 ± 1.2 | 5.1 ± 1.8 | 3.1 ± 1.6 |
+| 10 s | 0.14° | 2.0 ± 1.2 | 5.2 ± 1.9 | 3.1 ± 1.6 |
+| 20 s | 0.15° | 2.1 ± 1.2 | 5.4 ± 1.9 | 3.2 ± 1.6 |
+| 30 s | 0.17° | 2.1 ± 1.1 | 5.9 ± 2.0 | 3.3 ± 1.6 |
+
+![intershot](results/fig_intershot.png)
+
+The fix is essentially flat for a quick slew and degrades only as the gyro-carry crosses the ~0.13° differential floor (tens of seconds). **Land** is unaffected (no translation, little drift); **sea/air** are fine for a brisk slew because the known velocity removes the translation — the limit is how steadily the gyro holds the vertical, not how far you moved. Practical guidance: take the two shots back-to-back (a few seconds), and the differential stays horizon-free.
+
 ## The unified factor graph — everything fused
 
 One graph fuses every observable at once. Per Sun+Moon shot there is a pose `X(i)` (position + attitude), a velocity `V(i)` and a shared IMU bias `B`; consecutive keyframes are tied by IMU preintegration, and each shot contributes six celestial factors (altitude, azimuth and parallactic line, for the Sun and the Moon).
@@ -63,9 +80,9 @@ Starting from the full fusion and removing one observable at a time:
 
 | Regime | full fusion | - ultrawide horizon | - IMU link | - optical azimuth | - parallactic line | - Δq (Sun-Moon) | - gating | - Moon (Sun only) |
 |---|---|---|---|---|---|---|---|---|
-| Land (stationary) | 2.1 ± 0.9 | 2.1 ± 0.9 | 7.9 ± 1.2 | 3.0 ± 1.5 | 3.4 ± 2.2 | 3.0 ± 1.7 | 2.5 ± 0.3 | 2.5 ± 1.1 |
-| Sea (vessel + swell) | 1.6 ± 0.8 | 3.2 ± 1.2 | 5.5 ± 0.6 | 1.9 ± 0.9 | 1.8 ± 0.9 | 2.0 ± 0.9 | 4.0 ± 1.0 | 1.6 ± 0.8 |
-| Air (aircraft) | 1.7 ± 0.9 | 2.4 ± 1.1 | 5.5 ± 0.6 | 1.9 ± 0.9 | 2.0 ± 1.1 | 2.1 ± 1.1 | 1.9 ± 0.9 | 1.6 ± 0.7 |
+| Land (stationary) | 2.1 ± 0.9 | 2.1 ± 0.9 | 8.0 ± 1.2 | 3.0 ± 1.5 | 3.4 ± 2.2 | 3.0 ± 1.7 | 2.6 ± 0.3 | 2.5 ± 1.1 |
+| Sea (vessel + swell) | 1.6 ± 0.8 | 3.2 ± 1.2 | 5.6 ± 0.6 | 1.9 ± 0.9 | 1.8 ± 0.9 | 2.0 ± 0.9 | 4.0 ± 1.0 | 1.6 ± 0.8 |
+| Air (aircraft) | 1.7 ± 0.9 | 2.4 ± 1.1 | 5.6 ± 0.6 | 1.9 ± 0.9 | 2.0 ± 1.1 | 2.1 ± 1.1 | 1.9 ± 0.9 | 1.6 ± 0.7 |
 
 ![ablation](results/fig_ablation.png)
 
@@ -83,9 +100,9 @@ Per-fix latency at 30 shots (host CPU, single thread; an A19 Pro is comparable):
 
 | Regime | batch re-solve | **streaming update** | speedup | final-error parity (batch / stream) |
 |---|---|---|---|---|
-| Land (stationary) | 255 ms | **4.2 ms** | 60× | 1.72 / 2.38 km |
-| Sea (vessel + swell) | 232 ms | **3.5 ms** | 65× | 1.36 / 1.65 km |
-| Air (aircraft) | 229 ms | **3.5 ms** | 66× | 1.35 / 1.62 km |
+| Land (stationary) | 243 ms | **4.1 ms** | 59× | 1.73 / 2.38 km |
+| Sea (vessel + swell) | 240 ms | **3.6 ms** | 66× | 1.37 / 1.65 km |
+| Air (aircraft) | 244 ms | **3.6 ms** | 68× | 1.35 / 1.62 km |
 
 ![realtime](results/fig_realtime.png)
 
@@ -117,7 +134,7 @@ So it is the reverse of *"wide lens for high hours"*: **the wide lens is the LOW
 
 | Regime | wide-only | ultrawide | adaptive |
 |---|---|---|---|
-| Sea (vessel + swell) | 2.9 ± 1.4 | 1.5 ± 0.6 | 1.5 ± 0.6 |
+| Sea (vessel + swell) | 3.0 ± 1.4 | 1.5 ± 0.6 | 1.5 ± 0.6 |
 | Air (aircraft) | 2.6 ± 1.3 | 1.5 ± 0.6 | 1.5 ± 0.6 |
 
 Practical guidance: for this method prefer **moderate-to-low body altitudes (~15–30°)** — the wide lens then delivers the sharpest horizon and refraction is still manageable (below ~15° refraction/dip uncertainty grows; `starfix` models it). High-noon sights are the worst case for the optical horizon.
@@ -140,7 +157,7 @@ The gyro alone diverges (~0.17′/s); the accelerometer is bounded but wrecked b
 | Regime | optical horizon: no anchor / anchor | no optical horizon: no anchor / anchor |
 |---|---|---|
 | Land (stationary) | 2.1 ± 0.9 / **1.2 ± 0.4** | 2.1 ± 0.9 / **1.2 ± 0.4** |
-| Sea (vessel + swell) | 1.4 ± 0.5 / **1.1 ± 0.4** | 3.2 ± 1.9 / **1.3 ± 0.4** |
+| Sea (vessel + swell) | 1.4 ± 0.5 / **1.1 ± 0.4** | 3.3 ± 1.9 / **1.3 ± 0.4** |
 | Air (aircraft) | 1.5 ± 0.6 / **1.1 ± 0.4** | 2.7 ± 0.6 / **1.2 ± 0.4** |
 
 ![anchor fix](results/fig_anchor_fix.png)

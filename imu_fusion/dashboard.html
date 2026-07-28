@@ -49,7 +49,7 @@ position.</figcaption></figure>
 <table><tr><th>Regime</th><th>full fusion</th>
 <th>− ultrawide</th><th>− IMU</th><th>− opt. az</th><th>− parallactic</th>
 <th>− Δq(☉−☾)</th><th>− gating</th><th>− Moon</th></tr>
-<tr><td>Land (stationary)</td><td class='hi'>2.1 ± 0.9</td><td class='mono dim'>2.1 ± 0.9</td><td class='mono dim'>7.9 ± 1.2</td><td class='mono dim'>3.0 ± 1.5</td><td class='mono dim'>3.4 ± 2.2</td><td class='mono dim'>3.0 ± 1.7</td><td class='mono dim'>2.5 ± 0.3</td><td class='mono dim'>2.5 ± 1.1</td></tr><tr><td>Sea (vessel + swell)</td><td class='hi'>1.6 ± 0.8</td><td class='mono dim'>3.2 ± 1.2</td><td class='mono dim'>5.5 ± 0.6</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>1.8 ± 0.9</td><td class='mono dim'>2.0 ± 0.9</td><td class='mono dim'>4.0 ± 1.0</td><td class='mono dim'>1.6 ± 0.8</td></tr><tr><td>Air (aircraft)</td><td class='hi'>1.7 ± 0.9</td><td class='mono dim'>2.4 ± 1.1</td><td class='mono dim'>5.5 ± 0.6</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>2.1 ± 1.1</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>1.6 ± 0.7</td></tr></table>
+<tr><td>Land (stationary)</td><td class='hi'>2.1 ± 0.9</td><td class='mono dim'>2.1 ± 0.9</td><td class='mono dim'>8.0 ± 1.2</td><td class='mono dim'>3.0 ± 1.5</td><td class='mono dim'>3.4 ± 2.2</td><td class='mono dim'>3.0 ± 1.7</td><td class='mono dim'>2.6 ± 0.3</td><td class='mono dim'>2.5 ± 1.1</td></tr><tr><td>Sea (vessel + swell)</td><td class='hi'>1.6 ± 0.8</td><td class='mono dim'>3.2 ± 1.2</td><td class='mono dim'>5.6 ± 0.6</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>1.8 ± 0.9</td><td class='mono dim'>2.0 ± 0.9</td><td class='mono dim'>4.0 ± 1.0</td><td class='mono dim'>1.6 ± 0.8</td></tr><tr><td>Air (aircraft)</td><td class='hi'>1.7 ± 0.9</td><td class='mono dim'>2.4 ± 1.1</td><td class='mono dim'>5.6 ± 0.6</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>2.0 ± 1.1</td><td class='mono dim'>2.1 ± 1.1</td><td class='mono dim'>1.9 ± 0.9</td><td class='mono dim'>1.6 ± 0.7</td></tr></table>
 <p class='note'>Leave-one-out: the first column is the full fusion; each other
 column removes one observable, so a bigger number is a more valuable observable.</p>
 <figure><img src='results/fig_ablation.png'><figcaption>What each observable is
@@ -65,7 +65,7 @@ bounded</b> — with the same current-position accuracy. Fixes are low-rate; IMU
 dead-reckoning covers the gaps.</p>
 <table><tr><th>Regime</th><th>batch @ 30 shots</th>
 <th>streaming update</th><th>speedup</th><th>final-error (batch / stream)</th></tr>
-<tr><td>Land (stationary)</td><td class='mono dim'>255 ms</td><td class='mono hi'>4.2 ms</td><td class='mono'>60×</td><td class='mono'>1.72 / 2.38 km</td></tr><tr><td>Sea (vessel + swell)</td><td class='mono dim'>232 ms</td><td class='mono hi'>3.5 ms</td><td class='mono'>65×</td><td class='mono'>1.36 / 1.65 km</td></tr><tr><td>Air (aircraft)</td><td class='mono dim'>229 ms</td><td class='mono hi'>3.5 ms</td><td class='mono'>66×</td><td class='mono'>1.35 / 1.62 km</td></tr></table>
+<tr><td>Land (stationary)</td><td class='mono dim'>243 ms</td><td class='mono hi'>4.1 ms</td><td class='mono'>59×</td><td class='mono'>1.73 / 2.38 km</td></tr><tr><td>Sea (vessel + swell)</td><td class='mono dim'>240 ms</td><td class='mono hi'>3.6 ms</td><td class='mono'>66×</td><td class='mono'>1.37 / 1.65 km</td></tr><tr><td>Air (aircraft)</td><td class='mono dim'>244 ms</td><td class='mono hi'>3.6 ms</td><td class='mono'>68×</td><td class='mono'>1.35 / 1.62 km</td></tr></table>
 <figure><img src='results/fig_realtime.png'><figcaption>Per-fix latency vs trip
 length: batch grows, streaming stays flat under the real-time budget.</figcaption></figure>
 </div>
@@ -181,6 +181,25 @@ timestamp is stripped: the sky carries the clock.</p>
 <figure><img src='results/fig_elongation.png'><figcaption>Left: per-observable
 position σ. Right: the elongation-as-clock precision vs how well the Sun–Moon
 separation is measured.</figcaption></figure>
+</div>
+
+
+<div class='card'>
+<h2>One phone → sequential shots: how long a slew can you afford?</h2>
+<p>The horizon-free <b>Δq(Sun−Moon)</b> line needs both disks, but a single phone
+shoots the Sun, then slews ~94° and shoots the Moon a few seconds later. The Moon
+shot is <b>dead-reckoned</b> (the factor advances it by your known velocity × gap,
+so the translation — 0 on land, ~0.6 km/s in air — is removed) and each disk keeps
+its own timestamp. What remains is the <b>gyro carrying the vertical across the
+slew</b>: that roll-carry grows ~√gap and erodes the horizon-free purity.</p>
+<table><tr><th>Slew gap</th><th>Δq σ (air)</th><th>Land (stationary) fix</th><th>Sea (vessel + swell) fix</th><th>Air (aircraft) fix</th></tr>
+<tr><td>0 s</td><td class='mono'>0.13°</td><td class='mono'>2.0 ± 1.2</td><td class='mono'>5.0 ± 1.8</td><td class='mono'>3.1 ± 1.5</td></tr><tr><td>2 s</td><td class='mono'>0.14°</td><td class='mono'>2.0 ± 1.2</td><td class='mono'>5.1 ± 1.8</td><td class='mono'>3.1 ± 1.5</td></tr><tr><td>5 s</td><td class='mono'>0.14°</td><td class='mono'>2.0 ± 1.2</td><td class='mono'>5.1 ± 1.8</td><td class='mono'>3.1 ± 1.6</td></tr><tr><td>10 s</td><td class='mono'>0.14°</td><td class='mono'>2.0 ± 1.2</td><td class='mono'>5.2 ± 1.9</td><td class='mono'>3.1 ± 1.6</td></tr><tr><td>20 s</td><td class='mono'>0.15°</td><td class='mono'>2.1 ± 1.2</td><td class='mono'>5.4 ± 1.9</td><td class='mono'>3.2 ± 1.6</td></tr><tr><td>30 s</td><td class='mono'>0.17°</td><td class='mono'>2.1 ± 1.1</td><td class='mono'>5.9 ± 2.0</td><td class='mono'>3.3 ± 1.6</td></tr></table>
+<figure><img src='results/fig_intershot.png'><figcaption>Fix and differential σ
+vs the inter-shot slew gap. Flat for a quick slew; degrades only as the gyro-carry
+crosses the ~0.13° differential floor (tens of seconds).</figcaption></figure>
+<p class='note'>Take the two shots back-to-back (a few seconds) and the
+differential stays horizon-free; the limit is how steadily the gyro holds the
+vertical during the slew, not how far you moved.</p>
 </div>
 
 
