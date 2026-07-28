@@ -1,0 +1,159 @@
+<title>Live factor graph — iPhone Sun+Moon fix</title>
+<style>
+:root{--bg:#0f1419;--panel:#1a222c;--fg:#e6edf3;--mut:#9db0c0;--line:#2b3946}
+@media(prefers-color-scheme:light){:root{--bg:#f5f7fa;--panel:#fff;--fg:#12212e;--mut:#4a5b6b;--line:#dfe6ee}}
+:root[data-theme=dark]{--bg:#0f1419;--panel:#1a222c;--fg:#e6edf3;--mut:#9db0c0;--line:#2b3946}
+:root[data-theme=light]{--bg:#f5f7fa;--panel:#fff;--fg:#12212e;--mut:#4a5b6b;--line:#dfe6ee}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+#wrap{display:flex;flex-direction:column;height:100vh}
+header{padding:.6rem .9rem;border-bottom:1px solid var(--line)}
+h1{font-size:1rem;margin:0}.sub{color:var(--mut);font-size:.8rem;margin-top:.15rem}
+#main{flex:1;position:relative;overflow:hidden}
+svg{width:100%;height:100%;display:block;cursor:grab}svg.drag{cursor:grabbing}
+.edge{stroke:var(--line);stroke-width:1}
+.varlbl{font-size:9px;fill:var(--fg);pointer-events:none;text-anchor:middle;dominant-baseline:central}
+.fade{opacity:.12}
+#controls{padding:.5rem .9rem;border-top:1px solid var(--line);display:flex;
+gap:.8rem;align-items:center;flex-wrap:wrap;background:var(--panel)}
+button{background:#00b4d8;border:0;color:#012;border-radius:6px;padding:.3rem .7rem;
+font-weight:600;cursor:pointer}button.sec{background:var(--line);color:var(--fg)}
+input[type=range]{flex:1;min-width:120px}
+#legend{position:absolute;top:.6rem;right:.6rem;background:var(--panel);border:1px solid var(--line);
+border-radius:8px;padding:.5rem .6rem;max-width:230px;font-size:.78rem}
+.chip{display:flex;align-items:center;gap:.4rem;padding:.12rem 0;cursor:pointer;user-select:none}
+.chip.off{opacity:.35}.sw{width:11px;height:11px;border-radius:2px;flex:0 0 auto}
+.sw.circle{border-radius:50%}
+#tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);
+border-radius:6px;padding:.35rem .5rem;font-size:.76rem;display:none;max-width:220px;z-index:5}
+.mono{font-variant-numeric:tabular-nums}
+</style>
+<div id="wrap">
+<header><h1>Live factor graph — <span id="stitle"></span></h1>
+<div class="sub" id="ssub"></div></header>
+<div id="main"><svg id="svg"></svg><div id="legend"></div><div id="tip"></div></div>
+<div id="controls">
+<button id="play">▶ Play</button>
+<button class="sec" id="mode">Streaming: on</button>
+<span class="mono" id="steplbl" style="min-width:8em"></span>
+<input type="range" id="slider" min="0" value="0" step="1">
+<button class="sec" id="reset">Reset view</button>
+</div></div>
+<script>
+const D={"nodes": [{"id": "x0", "label": "X0", "kind": "pose", "step": 0, "marg": 3}, {"id": "x1", "label": "X1", "kind": "pose", "step": 1, "marg": 5}, {"id": "x2", "label": "X2", "kind": "pose", "step": 2, "marg": 5}, {"id": "x3", "label": "X3", "kind": "pose", "step": 3, "marg": null}, {"id": "x4", "label": "X4", "kind": "pose", "step": 4, "marg": null}, {"id": "x5", "label": "X5", "kind": "pose", "step": 5, "marg": null}, {"id": "v0", "label": "V0", "kind": "vel", "step": 0, "marg": 3}, {"id": "v1", "label": "V1", "kind": "vel", "step": 1, "marg": 5}, {"id": "v2", "label": "V2", "kind": "vel", "step": 2, "marg": 5}, {"id": "v3", "label": "V3", "kind": "vel", "step": 3, "marg": null}, {"id": "v4", "label": "V4", "kind": "vel", "step": 4, "marg": null}, {"id": "v5", "label": "V5", "kind": "vel", "step": 5, "marg": null}, {"id": "b0", "label": "B", "kind": "bias", "step": 0, "marg": null}], "factors": [{"id": "prior0", "type": "prior", "vars": ["x0"], "step": 0, "marg": 3, "sigma": "attitude 1e-3 rad / E,N loose"}, {"id": "alt_Sun_0", "type": "alt_Sun", "vars": ["x0"], "step": 0, "marg": 3, "sigma": "3.25\u2032"}, {"id": "az_Sun_0", "type": "az_Sun", "vars": ["x0"], "step": 0, "marg": 3, "sigma": "5.77\u2032"}, {"id": "q_Sun_0", "type": "q_Sun", "vars": ["x0"], "step": 0, "marg": 3, "sigma": "0.110\u00b0"}, {"id": "alt_Moon_0", "type": "alt_Moon", "vars": ["x0"], "step": 0, "marg": 3, "sigma": "3.25\u2032"}, {"id": "az_Moon_0", "type": "az_Moon", "vars": ["x0"], "step": 0, "marg": 3, "sigma": "113.06\u2032"}, {"id": "q_Moon_0", "type": "q_Moon", "vars": ["x0"], "step": 0, "marg": 3, "sigma": "0.119\u00b0"}, {"id": "diff0", "type": "diff", "vars": ["x0"], "step": 0, "marg": 3, "sigma": "0.147\u00b0 horizon-free"}, {"id": "prior1", "type": "prior", "vars": ["x1"], "step": 1, "marg": 5, "sigma": "attitude 1e-3 rad / E,N loose"}, {"id": "alt_Sun_1", "type": "alt_Sun", "vars": ["x1"], "step": 1, "marg": 5, "sigma": "2.96\u2032"}, {"id": "az_Sun_1", "type": "az_Sun", "vars": ["x1"], "step": 1, "marg": 5, "sigma": "5.61\u2032"}, {"id": "q_Sun_1", "type": "q_Sun", "vars": ["x1"], "step": 1, "marg": 5, "sigma": "0.106\u00b0"}, {"id": "alt_Moon_1", "type": "alt_Moon", "vars": ["x1"], "step": 1, "marg": 5, "sigma": "2.96\u2032"}, {"id": "az_Moon_1", "type": "az_Moon", "vars": ["x1"], "step": 1, "marg": 5, "sigma": "113.05\u2032"}, {"id": "q_Moon_1", "type": "q_Moon", "vars": ["x1"], "step": 1, "marg": 5, "sigma": "0.114\u00b0"}, {"id": "diff1", "type": "diff", "vars": ["x1"], "step": 1, "marg": 5, "sigma": "0.144\u00b0 horizon-free"}, {"id": "prior2", "type": "prior", "vars": ["x2"], "step": 2, "marg": 5, "sigma": "attitude 1e-3 rad / E,N loose"}, {"id": "alt_Sun_2", "type": "alt_Sun", "vars": ["x2"], "step": 2, "marg": 5, "sigma": "2.87\u2032"}, {"id": "az_Sun_2", "type": "az_Sun", "vars": ["x2"], "step": 2, "marg": 5, "sigma": "5.56\u2032"}, {"id": "q_Sun_2", "type": "q_Sun", "vars": ["x2"], "step": 2, "marg": 5, "sigma": "0.104\u00b0"}, {"id": "alt_Moon_2", "type": "alt_Moon", "vars": ["x2"], "step": 2, "marg": 5, "sigma": "2.87\u2032"}, {"id": "az_Moon_2", "type": "az_Moon", "vars": ["x2"], "step": 2, "marg": 5, "sigma": "113.04\u2032"}, {"id": "q_Moon_2", "type": "q_Moon", "vars": ["x2"], "step": 2, "marg": 5, "sigma": "0.113\u00b0"}, {"id": "diff2", "type": "diff", "vars": ["x2"], "step": 2, "marg": 5, "sigma": "0.143\u00b0 horizon-free"}, {"id": "prior3", "type": "prior", "vars": ["x3"], "step": 3, "marg": null, "sigma": "attitude 1e-3 rad / E,N loose"}, {"id": "alt_Sun_3", "type": "alt_Sun", "vars": ["x3"], "step": 3, "marg": null, "sigma": "3.26\u2032"}, {"id": "az_Sun_3", "type": "az_Sun", "vars": ["x3"], "step": 3, "marg": null, "sigma": "5.78\u2032"}, {"id": "q_Sun_3", "type": "q_Sun", "vars": ["x3"], "step": 3, "marg": null, "sigma": "0.111\u00b0"}, {"id": "alt_Moon_3", "type": "alt_Moon", "vars": ["x3"], "step": 3, "marg": null, "sigma": "3.26\u2032"}, {"id": "az_Moon_3", "type": "az_Moon", "vars": ["x3"], "step": 3, "marg": null, "sigma": "113.05\u2032"}, {"id": "q_Moon_3", "type": "q_Moon", "vars": ["x3"], "step": 3, "marg": null, "sigma": "0.119\u00b0"}, {"id": "diff3", "type": "diff", "vars": ["x3"], "step": 3, "marg": null, "sigma": "0.148\u00b0 horizon-free"}, {"id": "prior4", "type": "prior", "vars": ["x4"], "step": 4, "marg": null, "sigma": "attitude 1e-3 rad / E,N loose"}, {"id": "alt_Sun_4", "type": "alt_Sun", "vars": ["x4"], "step": 4, "marg": null, "sigma": "3.12\u2032"}, {"id": "az_Sun_4", "type": "az_Sun", "vars": ["x4"], "step": 4, "marg": null, "sigma": "5.70\u2032"}, {"id": "q_Sun_4", "type": "q_Sun", "vars": ["x4"], "step": 4, "marg": null, "sigma": "0.108\u00b0"}, {"id": "alt_Moon_4", "type": "alt_Moon", "vars": ["x4"], "step": 4, "marg": null, "sigma": "3.12\u2032"}, {"id": "az_Moon_4", "type": "az_Moon", "vars": ["x4"], "step": 4, "marg": null, "sigma": "113.05\u2032"}, {"id": "q_Moon_4", "type": "q_Moon", "vars": ["x4"], "step": 4, "marg": null, "sigma": "0.117\u00b0"}, {"id": "diff4", "type": "diff", "vars": ["x4"], "step": 4, "marg": null, "sigma": "0.146\u00b0 horizon-free"}, {"id": "prior5", "type": "prior", "vars": ["x5"], "step": 5, "marg": null, "sigma": "attitude 1e-3 rad / E,N loose"}, {"id": "alt_Sun_5", "type": "alt_Sun", "vars": ["x5"], "step": 5, "marg": null, "sigma": "2.63\u2032"}, {"id": "az_Sun_5", "type": "az_Sun", "vars": ["x5"], "step": 5, "marg": null, "sigma": "5.44\u2032"}, {"id": "q_Sun_5", "type": "q_Sun", "vars": ["x5"], "step": 5, "marg": null, "sigma": "0.101\u00b0"}, {"id": "alt_Moon_5", "type": "alt_Moon", "vars": ["x5"], "step": 5, "marg": null, "sigma": "2.63\u2032"}, {"id": "az_Moon_5", "type": "az_Moon", "vars": ["x5"], "step": 5, "marg": null, "sigma": "113.03\u2032"}, {"id": "q_Moon_5", "type": "q_Moon", "vars": ["x5"], "step": 5, "marg": null, "sigma": "0.110\u00b0"}, {"id": "diff5", "type": "diff", "vars": ["x5"], "step": 5, "marg": null, "sigma": "0.140\u00b0 horizon-free"}, {"id": "imu0", "type": "imu", "vars": ["x0", "v0", "x1", "v1", "b0"], "step": 1, "marg": 3, "sigma": "preintegrated accel+gyro"}, {"id": "imu1", "type": "imu", "vars": ["x1", "v1", "x2", "v2", "b0"], "step": 2, "marg": 5, "sigma": "preintegrated accel+gyro"}, {"id": "imu2", "type": "imu", "vars": ["x2", "v2", "x3", "v3", "b0"], "step": 3, "marg": 5, "sigma": "preintegrated accel+gyro"}, {"id": "imu3", "type": "imu", "vars": ["x3", "v3", "x4", "v4", "b0"], "step": 4, "marg": null, "sigma": "preintegrated accel+gyro"}, {"id": "imu4", "type": "imu", "vars": ["x4", "v4", "x5", "v5", "b0"], "step": 5, "marg": null, "sigma": "preintegrated accel+gyro"}, {"id": "vprior", "type": "vprior", "vars": ["v0"], "step": 0, "marg": 3, "sigma": "5 m/s"}, {"id": "bprior", "type": "bprior", "vars": ["b0"], "step": 0, "marg": null, "sigma": "0.1"}], "n_shots": 6, "lag_s": 30.0, "epoch": "2026-03-24 12:00:09+00:00", "factor_style": {"prior": ["#d1495b", "attitude + height prior"], "alt_Sun": ["#c8992e", "altitude \u2609"], "alt_Moon": ["#5b6b86", "altitude \u263e"], "az_Sun": ["#e0ad4b", "azimuth \u2609"], "az_Moon": ["#8aa0bf", "azimuth \u263e"], "q_Sun": ["#b07d1a", "parallactic q \u2609"], "q_Moon": ["#6b7f9e", "parallactic q \u263e"], "diff": ["#3ddc97", "\u0394q (Sun\u2212Moon) \u2014 horizon-free"], "imu": ["#edae49", "IMU preintegration"], "vprior": ["#9bb0bd", "velocity prior"], "bprior": ["#c9a978", "bias prior"]}, "var_style": {"pose": ["#e8f1f3", "pose X (position+attitude)"], "vel": ["#e7efe8", "velocity V"], "bias": ["#f2e2c2", "IMU bias B"]}, "counts": {"variables": 13, "factors": 55}};
+const NS='http://www.w3.org/2000/svg';
+const svg=document.getElementById('svg'), tip=document.getElementById('tip');
+document.getElementById('stitle').textContent=`${D.counts.variables} variables · ${D.counts.factors} factors`;
+document.getElementById('ssub').textContent=`Real GTSAM graph · canonical epoch ${D.epoch} · ${D.n_shots} Sun+Moon shots · fixed-lag ${D.lag_s}s. Drag nodes, scroll to zoom, toggle factor types, scrub the timeline.`;
+// build layout nodes (variables + factors) and edges
+const vmap={}; D.nodes.forEach(n=>{n.kind_='var';vmap[n.id]=n});
+const fmap={}; D.factors.forEach(f=>{f.kind_='fac';fmap[f.id]=f});
+const L=[...D.nodes,...D.factors];
+const edges=[]; D.factors.forEach(f=>f.vars.forEach(v=>{if(vmap[v])edges.push({a:f,b:vmap[v]})}));
+// initial positions: poses along a line, others near their pose
+let W=svg.clientWidth||900,H=svg.clientHeight||600;
+L.forEach((n,i)=>{n.x=W/2+Math.cos(i*2.4)*160*Math.random()+ (n.step||0)*40-D.n_shots*20;
+ n.y=H/2+Math.sin(i*2.4)*120;n.vx=0;n.vy=0;n.pin=false;});
+D.nodes.forEach(n=>{if(n.kind==='pose'){n.x=120+n.step*(Math.max(W-240,300)/Math.max(D.n_shots-1,1));n.y=H*0.5;}});
+// force sim
+function tick(){
+ const vis=L.filter(n=>n._vis);
+ for(let i=0;i<vis.length;i++){const a=vis[i];
+  for(let j=i+1;j<vis.length;j++){const b=vis[j];
+   let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy+.01,d=Math.sqrt(d2);
+   let f=1400/d2; if(d<1){dx=Math.random();dy=Math.random();d=1;}
+   const fx=f*dx/d,fy=f*dy/d;
+   if(!a.pin){a.vx+=fx;a.vy+=fy;} if(!b.pin){b.vx-=fx;b.vy-=fy;}}}
+ edges.forEach(e=>{if(!e.a._vis||!e.b._vis)return;
+  let dx=e.b.x-e.a.x,dy=e.b.y-e.a.y,d=Math.sqrt(dx*dx+dy*dy)+.01,k=(d-46)*0.02;
+  const fx=k*dx/d,fy=k*dy/d;
+  if(!e.a.pin){e.a.vx+=fx;e.a.vy+=fy;} if(!e.b.pin){e.b.vx-=fx;e.b.vy-=fy;}});
+ vis.forEach(n=>{if(n.pin)return; if(n.kind==='pose'){n.vy+=(H*0.5-n.y)*0.02;}
+  n.vx*=0.82;n.vy*=0.82;n.x+=Math.max(-30,Math.min(30,n.vx));n.y+=Math.max(-30,Math.min(30,n.vy));});
+}
+// rendering
+const gE=el('g'),gF=el('g'),gN=el('g'),gT=el('g');
+svg.append(gE,gF,gN,gT);
+function el(t){return document.createElementNS(NS,t);}
+const shapes=new Map();
+L.forEach(n=>{
+ let s;
+ if(n.kind_==='var'){s=el('circle');s.setAttribute('r',n.kind==='pose'?15:n.kind==='bias'?12:11);
+  s.setAttribute('fill',D.var_style[n.kind][0]);s.setAttribute('stroke','#23303a');s.setAttribute('stroke-width',1.4);gN.append(s);
+  const tx=el('text');tx.setAttribute('class','varlbl');tx.textContent=n.label;gT.append(tx);n._t=tx;
+ }else{s=el('rect');const w=n.type==='imu'?13:10;s.setAttribute('width',w);s.setAttribute('height',w);
+  s.setAttribute('rx',2);s.setAttribute('fill',D.factor_style[n.type][0]);s.setAttribute('stroke','#23303a');gF.append(s);}
+ s.style.cursor='pointer';shapes.set(n.id,s);
+ s.addEventListener('mousemove',ev=>showTip(ev,n));s.addEventListener('mouseleave',()=>tip.style.display='none');
+ s.addEventListener('mousedown',ev=>startDrag(ev,n));
+});
+const elines=edges.map(e=>{const l=el('line');l.setAttribute('class','edge');gE.append(l);return l;});
+function draw(){
+ L.forEach(n=>{const s=shapes.get(n.id);const on=n._vis, faded=n._fade;
+  s.style.display=on?'':'none'; s.setAttribute('class',faded?'fade':'');
+  if(n.kind_==='var'){s.setAttribute('cx',n.x);s.setAttribute('cy',n.y);
+   n._t.style.display=on?'':'none';n._t.setAttribute('class','varlbl'+(faded?' fade':''));
+   n._t.setAttribute('x',n.x);n._t.setAttribute('y',n.y);}
+  else{const w=n.type==='imu'?13:10;s.setAttribute('x',n.x-w/2);s.setAttribute('y',n.y-w/2);}});
+ edges.forEach((e,i)=>{const l=elines[i];const on=e.a._vis&&e.b._vis;l.style.display=on?'':'none';
+  l.setAttribute('class','edge'+((e.a._fade||e.b._fade)?' fade':''));
+  l.setAttribute('x1',e.a.x);l.setAttribute('y1',e.a.y);l.setAttribute('x2',e.b.x);l.setAttribute('y2',e.b.y);});
+}
+// visibility from timeline + legend + mode
+const hidden=new Set(); let streaming=true; let step=D.n_shots;
+function applyVis(){
+ L.forEach(n=>{
+  const appeared=(n.step||0)<=step;
+  const typeHidden=n.kind_==='fac'&&hidden.has(n.type);
+  const marged=streaming&&n.marg!=null&&n.marg<=step;
+  n._vis=appeared&&!typeHidden&&!(marged&&false); // keep marged but faded
+  n._fade=marged;
+  if(marged)n._vis=appeared&&!typeHidden;
+ });
+}
+// legend
+const lg=document.getElementById('legend');
+const seen=new Set();
+Object.keys(D.var_style).forEach(k=>{const [c,lab]=D.var_style[k];
+ lg.append(chip(c,lab,null,true));});
+D.factors.forEach(f=>{if(seen.has(f.type))return;seen.add(f.type);
+ const[c,lab]=D.factor_style[f.type];lg.append(chip(c,lab,f.type,false));});
+function chip(color,label,type,circle){const d=document.createElement('div');d.className='chip';
+ const sw=document.createElement('span');sw.className='sw'+(circle?' circle':'');sw.style.background=color;
+ const tx=document.createElement('span');tx.textContent=label;d.append(sw,tx);
+ if(type!=null)d.addEventListener('click',()=>{if(hidden.has(type)){hidden.delete(type);d.classList.remove('off');}
+  else{hidden.add(type);d.classList.add('off');}applyVis();draw();});
+ return d;}
+// tooltip
+function showTip(ev,n){tip.style.display='block';
+ const r=svg.getBoundingClientRect();tip.style.left=(ev.clientX-r.left+12)+'px';tip.style.top=(ev.clientY-r.top+12)+'px';
+ if(n.kind_==='var')tip.innerHTML=`<b>${n.label}</b><br>${D.var_style[n.kind][1]}<br>appears @ shot ${n.step}`+(n.marg!=null?`<br>marginalises @ shot ${n.marg}`:'');
+ else tip.innerHTML=`<b>${D.factor_style[n.type][1]}</b><br>σ = ${n.sigma}<br>on ${n.vars.join(', ')}<br>added @ shot ${n.step}`;
+}
+// drag + pan + zoom via viewBox
+let vb={x:0,y:0,w:W,h:H};function setVB(){svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);}
+function toWorld(ev){const r=svg.getBoundingClientRect();return{x:vb.x+(ev.clientX-r.left)/r.width*vb.w,y:vb.y+(ev.clientY-r.top)/r.height*vb.h};}
+let drag=null,pan=null;
+function startDrag(ev,n){ev.stopPropagation();drag=n;n.pin=true;svg.classList.add('drag');}
+svg.addEventListener('mousedown',ev=>{if(drag)return;pan={x:ev.clientX,y:ev.clientY,vx:vb.x,vy:vb.y};svg.classList.add('drag');});
+window.addEventListener('mousemove',ev=>{if(drag){const p=toWorld(ev);drag.x=p.x;drag.y=p.y;drag.vx=drag.vy=0;}
+ else if(pan){const r=svg.getBoundingClientRect();vb.x=pan.vx-(ev.clientX-pan.x)/r.width*vb.w;vb.y=pan.vy-(ev.clientY-pan.y)/r.height*vb.h;setVB();}});
+window.addEventListener('mouseup',()=>{if(drag){drag.pin=false;}drag=null;pan=null;svg.classList.remove('drag');});
+svg.addEventListener('wheel',ev=>{ev.preventDefault();const p=toWorld(ev);const f=ev.deltaY>0?1.12:0.9;
+ vb.x=p.x-(p.x-vb.x)*f;vb.y=p.y-(p.y-vb.y)*f;vb.w*=f;vb.h*=f;setVB();},{passive:false});
+document.getElementById('reset').onclick=()=>{vb={x:0,y:0,w:W,h:H};setVB();};
+// timeline
+const slider=document.getElementById('slider');slider.max=D.n_shots;slider.value=D.n_shots;
+const steplbl=document.getElementById('steplbl');
+function setStep(s){step=+s;slider.value=s;steplbl.textContent=`shot ${s} / ${D.n_shots}`;applyVis();draw();}
+slider.oninput=e=>setStep(e.target.value);
+let playing=false,timer=null;
+document.getElementById('play').onclick=function(){playing=!playing;this.textContent=playing?'⏸ Pause':'▶ Play';
+ if(playing){if(step>=D.n_shots)setStep(0);timer=setInterval(()=>{if(step>=D.n_shots){playing=false;this.textContent='▶ Play';clearInterval(timer);return;}setStep(step+1);},900);}
+ else clearInterval(timer);};
+document.getElementById('mode').onclick=function(){streaming=!streaming;this.textContent='Streaming: '+(streaming?'on':'off');applyVis();draw();};
+// main loop
+setVB();setStep(D.n_shots);
+function loop(){for(let k=0;k<2;k++)tick();draw();requestAnimationFrame(loop);}
+loop();
+</script>
