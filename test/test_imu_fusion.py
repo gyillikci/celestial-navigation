@@ -872,5 +872,92 @@ class TestMissionPlan(unittest.TestCase):
             self.assertTrue(brief.moon_available)
 
 
+@unittest.skipUnless(_HAVE, "starfix / numpy not installed")
+class TestLandfall(unittest.TestCase):
+    ''' Landfall: fixing from surveyed land features once they clear the horizon. '''
+
+    def test_geographic_range_matches_classic_rule(self):
+        from imu_fusion.landfall import geographic_range_km, horizon_distance_km
+        # d(km) ~ 3.83 * sqrt(h_m) with standard refraction
+        self.assertAlmostEqual(horizon_distance_km(100.0), 3.83 * 10.0, delta=0.5)
+        # a 2000 m peak from a 10 m bridge is visible ~180 km off
+        self.assertTrue(170 < geographic_range_km(10.0, 2000.0) < 195)
+        # taller peak -> seen sooner
+        self.assertGreater(geographic_range_km(10.0, 3000.0),
+                           geographic_range_km(10.0, 1000.0))
+
+    def test_vertical_angle_range_roundtrip(self):
+        from imu_fusion.landfall import (vertical_angle_deg,
+                                         range_from_vertical_angle_km)
+        for d in (20.0, 60.0, 120.0):
+            a = vertical_angle_deg(d, 2000.0, 10.0)
+            back = range_from_vertical_angle_km(a, 2000.0, 10.0)
+            self.assertAlmostEqual(back, d, places=4)
+
+    def test_range_precision_degrades_with_distance(self):
+        from imu_fusion.landfall import range_sigma_km
+        near = range_sigma_km(30.0, 2000.0, 0.1, 10.0)
+        far = range_sigma_km(120.0, 2000.0, 0.1, 10.0)
+        self.assertLess(near, far)                     # geometry weakens with range
+        # a better vertical reference (sea horizon) beats the IMU floor
+        self.assertLess(range_sigma_km(60.0, 2000.0, 0.02, 10.0),
+                        range_sigma_km(60.0, 2000.0, 0.10, 10.0))
+
+    def test_refraction_is_the_floor_on_ranging(self):
+        from imu_fusion.landfall import (geographic_range_km,
+                                         geographic_range_spread_km)
+        # the dipping range is uncertain by a few percent no matter the instrument
+        r = geographic_range_km(10.0, 2000.0)
+        s = geographic_range_spread_km(10.0, 2000.0)
+        self.assertTrue(0.01 < s / r < 0.06)
+
+    def test_visibility_gate(self):
+        from imu_fusion.landfall import visible, geographic_range_km
+        r = geographic_range_km(10.0, 1000.0)
+        self.assertTrue(visible(r * 0.5, 1000.0, 10.0))
+        self.assertFalse(visible(r * 1.5, 1000.0, 10.0))
+
+    def test_horizontal_angle_fix_recovers_known_position(self):
+        ''' Three surveyed peaks + two subtended angles must recover the observer
+            with NO compass, from a badly displaced DR estimate. '''
+        from math import radians, degrees, sin, cos, atan2, fabs
+        from starfix import LatLonGeodetic
+        from imu_fusion.landfall import two_landmark_circle_fix
+        from imu_fusion.astro import great_circle_km
+
+        def bearing(lat1, lon1, lat2, lon2):
+            p1, p2 = radians(lat1), radians(lat2)
+            dl = radians(lon2 - lon1)
+            return degrees(atan2(sin(dl) * cos(p2),
+                                 cos(p1) * sin(p2)
+                                 - sin(p1) * cos(p2) * cos(dl))) % 360
+
+        peaks = [(41.60, 27.20), (41.20, 27.90), (40.85, 28.60)]
+        lat, lon = 40.60, 27.60
+        b = [bearing(lat, lon, p[0], p[1]) for p in peaks]
+        a12 = fabs(((b[1] - b[0] + 180) % 360) - 180)
+        a23 = fabs(((b[2] - b[1] + 180) % 360) - 180)
+        dr = LatLonGeodetic(lat + 0.25, lon - 0.30)          # ~38 km off
+        res = two_landmark_circle_fix(LatLonGeodetic(*peaks[0]),
+                                      LatLonGeodetic(*peaks[1]), a12,
+                                      LatLonGeodetic(*peaks[2]), a23,
+                                      estimate=dr)
+        fix = res[0]
+        if isinstance(fix, tuple):
+            fix = fix[0]
+        err_km = great_circle_km(lat, lon, fix.get_lat(), fix.get_lon())
+        self.assertLess(err_km, 0.2, f"landmark fix off by {err_km:.3f} km")
+
+    def test_horizontal_angle_beats_compass_bearing(self):
+        from imu_fusion.landfall import (cross_range_sigma_km,
+                                         horizontal_angle_sigma_deg,
+                                         horizontal_angle_fix_sigma_km)
+        d = 80.0
+        compass = cross_range_sigma_km(d, 1.5)               # phone magnetometer
+        sa = horizontal_angle_sigma_deg(1.0, 9.0, 50.0, d)   # +/-50 m summit ident
+        angles = horizontal_angle_fix_sigma_km(d, sa)
+        self.assertLess(angles, compass)                     # compass-free wins
+
+
 if __name__ == "__main__":
     unittest.main()

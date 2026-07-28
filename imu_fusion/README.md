@@ -44,6 +44,7 @@ instants (local minima of |ω|) to keep each IMU-photo pair clean.
 | `scenario.py` | Sea/land/air ground truth from the ephemeris + noisy Sun+Moon measurements + IMU stream. |
 | `validate_ephemeris.py` | **Ground-truth check**: recomputes the Sun/Moon GHA/Dec from an *independent* engine (astropy/ERFA, or Skyfield/JPL if a kernel is present) and reports the residual vs the almanac. Also loads a **Stellarium** CSV export as a third witness (`stellarium_reference.md`). |
 | `mission_plan.py` | **Mission planner**: for a route A→B, forecasts the Sun/Moon sky and answers the operational question *"is the Moon available, and when?"* — the both-bodies-up windows, a SUN-ONLY fallback flag, and warnings (near-new/full Moon, near-zenith Sun). CLI: `python -m imu_fusion.mission_plan --from Istanbul --to Ankara --next`. |
+| `landfall.py` | **Landfall**: fixing from surveyed land features once they clear the horizon — geographic (dipping) range, vertical-angle ranging, and the compass-free horizontal-angle circle fix (wraps `starfix.get_terrestrial_position`), with the refraction-driven error floor. |
 | `celestial_factor_graph.py` | GTSAM graph: celestial altitude `CustomFactor` per sight, `ImuFactor` between shots, priors, LM solve, `Marginals` covariance. |
 | `baseline.py` | Incumbent `starfix` single-epoch two-LOP fix, for comparison. |
 | `run_study.py` | Runs the whole study → `results/` figures, `RESULTS.md`, `dashboard.html`. |
