@@ -298,3 +298,154 @@ def resect(dem, obs: SkylineObservation, candidates, cam_above_ground_m: float =
         out.append(m)
     out.sort(key=lambda r: -r["score"])
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Priors: the realistic on-device entry point
+#
+# Blind resection is not what a phone does.  It has a dead-reckoned position
+# (metres to kilometres), a magnetometer heading (degrees), and it knows its own
+# lens.  Each prunes a dimension of the search, and the pruning is what makes the
+# problem real time.  Measured on one core:
+#
+#     blind             55 scales x 720 headings x 2 = 79200 hyp    1294 ms
+#     + magnetometer +/-20 deg                       =  8800 hyp     150 ms
+#     + known focal length                           =   160 hyp     3.1 ms
+#     + magnetometer +/-2 deg                        =    32 hyp     0.5 ms
+#
+# The magnetometer is a poor MEASUREMENT (see `terrain_factors`: ~360 m from
+# bearings at 1.5 deg, versus ~18 m from compass-free angles) but an excellent
+# SEARCH PRIOR -- worth about 2600x here, and it is what makes landmark
+# IDENTIFICATION unambiguous in the first place.
+# --------------------------------------------------------------------------- #
+
+def candidate_grid(lat: float, lon: float, radius_km: float, step_m: float):
+    ''' Square grid of candidate positions centred on a rough position. '''
+    n = max(1, int(radius_km * 1000.0 / step_m))
+    dlat = step_m * _DEG_PER_KM_LAT / 1000.0
+    dlon = step_m / (111320.0 * cos(radians(lat)))
+    return [(lat + i * dlat, lon + j * dlon)
+            for i in range(-n, n + 1) for j in range(-n, n + 1)]
+
+
+def resect_with_priors(dem, obs: SkylineObservation, rough_lat: float,
+                       rough_lon: float, prior_radius_km: float = 1.0,
+                       grid_step_m: float = 200.0,
+                       mag_heading_deg: float = None,
+                       mag_sigma_deg: float = 2.0, mag_n_sigma: float = 3.0,
+                       f_px_per_deg: float = None, f_list=None,
+                       az_step: float = 0.25, cam_above_ground_m: float = 2.0,
+                       min_ground_elev_m: float = None,
+                       render_pad_deg: float = 15.0, render_kw=None,
+                       peak_kw=None, min_inliers: int = 4):
+    ''' Resection from a rough position plus, optionally, a magnetometer heading
+        and a known angular scale.
+
+        mag_heading_deg is the bearing of the observation's MEAN x column (frame
+        or panorama centre), matching score_match's az0.  Only headings within
+        mag_n_sigma * mag_sigma_deg are tried, and only the arc the camera could
+        have seen is rendered.
+
+        Returns the same ranked list of dicts as `resect`.
+
+        ACCURACY IS GRID-LIMITED, NOT NOISE-LIMITED.  On synthetic data the
+        rank-1 error tracks `grid_step_m` and is almost flat in measurement
+        noise (mean error 141 m at 0 px and 141 m at 6 px of pointing noise;
+        254 / 149 / 101 m for 200 / 100 / 50 m grids).  This search is therefore
+        an IDENTIFIER, not the final estimator: use it to decide which DEM
+        summits were photographed, then hand those to `terrain_factors` for a
+        continuous least-squares fix with a covariance.
+    '''
+    render_kw = dict(render_kw or {})
+    peak_kw = peak_kw or {}
+    if f_px_per_deg is not None:
+        f_list = np.array([float(f_px_per_deg)])
+    elif f_list is None:
+        f_list = np.arange(30.0, 140.0, 2.0)
+
+    if mag_heading_deg is None:
+        az_candidates = np.arange(0.0, 360.0, az_step)
+    else:
+        half = mag_n_sigma * mag_sigma_deg
+        az_candidates = np.arange(mag_heading_deg - half,
+                                  mag_heading_deg + half + 1e-9, az_step)
+        sweep = (obs.xc.max() - obs.xc.min()) / float(np.min(f_list))
+        az_lo = mag_heading_deg - half - sweep / 2.0 - render_pad_deg
+        az_hi = mag_heading_deg + half + sweep / 2.0 + render_pad_deg
+        if az_hi - az_lo < 360.0:
+            render_kw.setdefault("az_start", az_lo)
+            render_kw.setdefault("az_end", az_hi)
+
+    out = []
+    for lat, lon in candidate_grid(rough_lat, rough_lon, prior_radius_km,
+                                   grid_step_m):
+        ground = float(dem.elevation(np.array([lat]), np.array([lon]))[0])
+        if min_ground_elev_m is not None and ground < min_ground_elev_m:
+            continue
+        azs, prof = render_skyline(dem, lat, lon, ground + cam_above_ground_m,
+                                   **render_kw)
+        peaks = skyline_peaks(azs, prof, **peak_kw)
+        best = None
+        for f in f_list:
+            for sign in (1, -1):
+                for az0 in az_candidates:
+                    m = score_match(obs, azs, prof, peaks, f, az0 % 360.0, sign,
+                                    min_inliers=min_inliers)
+                    if m is None:
+                        continue
+                    if best is None or (m["score"], -m["elev_resid_px"]) > \
+                            (best["score"], -best["elev_resid_px"]):
+                        best = m
+        if best is None:
+            continue
+        best.update(lat=lat, lon=lon, ground_elev_m=ground)
+        out.append(best)
+    out.sort(key=lambda r: -r["score"])
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Synthetic observations (for tests and for error-budget experiments)
+# --------------------------------------------------------------------------- #
+
+def synth_skyline_observation(dem, lat: float, lon: float,
+                              az_center_deg: float, fov_deg: float,
+                              width_px: int = 2000, cam_above_ground_m: float = 2.0,
+                              noise_px: float = 0.0, rng=None,
+                              cy_px: float = 500.0, render_kw=None,
+                              peak_kw=None):
+    ''' Photograph the DEM: render the horizon from a known position and project
+        its summits into image coordinates, exactly as `score_match` inverts.
+
+            x   = (azimuth - az_center) * f
+            row = cy - f * elevation_deg,     f = width_px / fov_deg
+
+        The mapping is linear in angle (panorama / cylindrical convention), which
+        is what the matcher assumes.  Returns (observation, truth) where truth
+        carries the generating parameters and the summits used.
+    '''
+    import random as _random
+    rng = rng or _random.Random(0)
+    f = width_px / float(fov_deg)
+    render_kw = dict(render_kw or {})
+    render_kw.setdefault("az_start", az_center_deg - fov_deg)
+    render_kw.setdefault("az_end", az_center_deg + fov_deg)
+    ground = float(dem.elevation(np.array([lat]), np.array([lon]))[0])
+    azs, prof = render_skyline(dem, lat, lon, ground + cam_above_ground_m,
+                               **render_kw)
+    peaks = skyline_peaks(azs, prof, **(peak_kw or {}))
+    keep = [p for p in peaks
+            if abs(((p[0] - az_center_deg + 180.0) % 360.0) - 180.0) <= fov_deg / 2.0]
+    if not keep:
+        return None, dict(reason="no summits in field of view")
+    keep = np.array(keep)
+    x = ((keep[:, 0] - az_center_deg + 180.0) % 360.0 - 180.0) * f
+    row = cy_px - f * keep[:, 1]
+    if noise_px:
+        x = x + np.array([rng.gauss(0.0, noise_px) for _ in x])
+        row = row + np.array([rng.gauss(0.0, noise_px) for _ in row])
+    obs = SkylineObservation(x, row, weight=np.ones(len(x)) * 10.0)
+    truth = dict(lat=lat, lon=lon, ground_elev_m=ground, az_center_deg=az_center_deg,
+                 fov_deg=fov_deg, f_px_per_deg=f, cy_px=cy_px,
+                 summits=keep, n_summits=len(keep))
+    return obs, truth

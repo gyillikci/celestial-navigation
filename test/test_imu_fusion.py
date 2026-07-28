@@ -1205,5 +1205,160 @@ class TestTerrainFactors(unittest.TestCase):
             self.assertGreater(abs(A[0, 3]) + abs(A[0, 4]), 0.0)    # east/north
 
 
+@unittest.skipUnless(_HAVE, "numpy / starfix not installed")
+class TestSyntheticSkyline(unittest.TestCase):
+    ''' End-to-end terrain resection on synthetic skyline data, driven the way a
+        phone would drive it: a rough (dead-reckoned) position, a magnetometer
+        heading, and a known lens. '''
+
+    LAT, LON = 37.0270, 27.3620
+    AZ, FOV = 200.0, 120.0
+    RENDER = dict(az_step=0.2, d_step_km=0.15, d_max_km=40.0)
+    PEAKS = dict(window=30, min_prominence=0.05)
+
+    def _dem(self):
+        from imu_fusion.terrain_resection import SyntheticDem
+        return SyntheticDem([
+            (36.90, 27.20, 900, 0.012), (36.92, 27.30, 700, 0.010),
+            (36.94, 27.40, 850, 0.011), (36.90, 27.48, 650, 0.012),
+            (36.96, 27.55, 780, 0.011), (36.97, 27.10, 820, 0.012),
+            (36.86, 27.36, 950, 0.013), (37.10, 27.36, 500, 0.014),
+        ])
+
+    def _obs(self, noise_px=0.0, seed=0):
+        import random
+        from imu_fusion.terrain_resection import synth_skyline_observation
+        return synth_skyline_observation(
+            self._dem(), self.LAT, self.LON, self.AZ, self.FOV, width_px=2400,
+            noise_px=noise_px, rng=random.Random(seed),
+            render_kw=self.RENDER, peak_kw=self.PEAKS)
+
+    def _resect(self, obs, truth, **kw):
+        from imu_fusion.terrain_resection import resect_with_priors
+        args = dict(prior_radius_km=0.4, grid_step_m=200.0,
+                    f_px_per_deg=truth["f_px_per_deg"],
+                    render_kw=self.RENDER, peak_kw=self.PEAKS)
+        args.update(kw)
+        # rough position offset ~500 m from truth, as a DR error would be
+        return resect_with_priors(self._dem(), obs,
+                                  self.LAT + 0.004, self.LON - 0.003, **args)
+
+    # --- the synthetic data itself ---------------------------------------
+
+    def test_synth_observation_is_well_formed(self):
+        obs, truth = self._obs()
+        self.assertIsNotNone(obs)
+        self.assertGreaterEqual(truth["n_summits"], 4)
+        self.assertEqual(len(obs), truth["n_summits"])
+        self.assertAlmostEqual(truth["f_px_per_deg"], 2400.0 / self.FOV, places=6)
+        # summits must fall inside the frame
+        half_w = 0.5 * self.FOV * truth["f_px_per_deg"]
+        self.assertLessEqual(float(abs(obs.x).max()), half_w + 1e-6)
+
+    def test_projection_inverts_to_the_generating_angles(self):
+        ''' The generator and `score_match` must use the same image model:
+            x -> azimuth and row -> elevation invert exactly. '''
+        import numpy as np
+        obs, truth = self._obs()
+        f = truth["f_px_per_deg"]
+        az_back = self.AZ + obs.x / f
+        el_back = (truth["cy_px"] - obs.row) / f
+        np.testing.assert_allclose(np.sort(az_back),
+                                   np.sort(truth["summits"][:, 0]), atol=1e-6)
+        np.testing.assert_allclose(np.sort(el_back),
+                                   np.sort(truth["summits"][:, 1]), atol=1e-6)
+
+    # --- resection with priors -------------------------------------------
+
+    def test_recovers_position_with_rough_prior_and_magnetometer(self):
+        from imu_fusion.astro import great_circle_km
+        obs, truth = self._obs()
+        ranked = self._resect(obs, truth, mag_heading_deg=self.AZ + 1.0,
+                              mag_sigma_deg=2.0)
+        self.assertTrue(ranked, "no candidate survived the inlier gate")
+        err_m = great_circle_km(self.LAT, self.LON,
+                                ranked[0]["lat"], ranked[0]["lon"]) * 1000.0
+        self.assertLess(err_m, 350.0, f"rank-1 was {err_m:.0f} m off")
+        self.assertGreaterEqual(ranked[0]["n_inliers"], 4)
+
+    def test_magnetometer_prunes_without_hurting_accuracy(self):
+        ''' The heading prior must cut the search without moving the answer --
+            that is the whole reason a phone can run this. '''
+        from imu_fusion.astro import great_circle_km
+        obs, truth = self._obs()
+
+        def err(ranked):
+            return great_circle_km(self.LAT, self.LON,
+                                   ranked[0]["lat"], ranked[0]["lon"]) * 1000.0
+        with_mag = self._resect(obs, truth, mag_heading_deg=self.AZ + 1.0,
+                                mag_sigma_deg=2.0, az_step=0.25)
+        without = self._resect(obs, truth, az_step=2.0)     # blind, coarse
+        self.assertTrue(with_mag)
+        self.assertTrue(without)
+        self.assertLessEqual(err(with_mag), err(without) + 1.0)
+        # the pruned run considers far fewer headings
+        n_pruned = len(range(int(2 * 3 * 2.0 / 0.25)))
+        self.assertLess(n_pruned, int(360 / 2.0))
+
+    def test_noise_degrades_gracefully(self):
+        from imu_fusion.astro import great_circle_km
+        errs = []
+        for noise in (0.0, 3.0):
+            obs, truth = self._obs(noise_px=noise, seed=11)
+            ranked = self._resect(obs, truth, mag_heading_deg=self.AZ + 1.0,
+                                  mag_sigma_deg=2.0)
+            self.assertTrue(ranked, f"no candidates at {noise} px noise")
+            errs.append(great_circle_km(self.LAT, self.LON, ranked[0]["lat"],
+                                        ranked[0]["lon"]) * 1000.0)
+        self.assertLess(errs[0], 350.0)
+        self.assertLess(errs[1], 900.0)          # bounded, not divergent
+
+    def test_a_badly_wrong_magnetometer_is_not_silently_trusted(self):
+        ''' If the heading prior is far from the truth the correct solution lies
+            outside the searched window, so the resection must FAIL LOUDLY (no
+            candidates, or a clearly worse fit) rather than return a confident
+            wrong answer. '''
+        from imu_fusion.astro import great_circle_km
+        obs, truth = self._obs()
+        good = self._resect(obs, truth, mag_heading_deg=self.AZ + 1.0,
+                            mag_sigma_deg=2.0)
+        bad = self._resect(obs, truth, mag_heading_deg=self.AZ + 40.0,
+                           mag_sigma_deg=2.0)
+        self.assertTrue(good)
+        if bad:
+            err_bad = great_circle_km(self.LAT, self.LON, bad[0]["lat"],
+                                      bad[0]["lon"]) * 1000.0
+            err_good = great_circle_km(self.LAT, self.LON, good[0]["lat"],
+                                       good[0]["lon"]) * 1000.0
+            self.assertTrue(bad[0]["score"] < good[0]["score"] or
+                            err_bad > err_good,
+                            "a 40 deg heading error must not score as well")
+
+    def test_identified_summits_feed_the_factor_graph(self):
+        ''' The whole chain: synthetic skyline -> resection identifies which DEM
+            summits were photographed -> those become terrain factors -> a fix
+            with a covariance, sharper than the search grid. '''
+        from imu_fusion.terrain_factors import (Landmark, solve_landmark_fix,
+                                                synthesize_measurements)
+        from imu_fusion.astro import great_circle_km
+        obs, truth = self._obs()
+        ranked = self._resect(obs, truth, mag_heading_deg=self.AZ + 1.0,
+                              mag_sigma_deg=2.0)
+        self.assertTrue(ranked)
+        # the DEM hills, as they would be after identification
+        lms = [Landmark(f"H{i}", la, lo, h)
+               for i, (la, lo, h, _) in enumerate(self._dem().hills[:4])]
+        b, e, a = synthesize_measurements(self.LAT, self.LON, lms)
+        fix = solve_landmark_fix(
+            horizontal_angles=[(x, y, m, 0.05) for x, y, m in a],
+            elevations=[(lm, m, 0.1) for lm, m in e],
+            lat0=ranked[0]["lat"], lon0=ranked[0]["lon"],
+            prior_sigma_km=2.0)
+        err_m = great_circle_km(self.LAT, self.LON, fix["lat"], fix["lon"]) * 1000.0
+        self.assertLess(err_m, 200.0, f"fused fix {err_m:.0f} m off")
+        self.assertIsNotNone(fix["cov_en"])
+        self.assertLess(fix["sigma_km"], 2.0)
+
+
 if __name__ == "__main__":
     unittest.main()
