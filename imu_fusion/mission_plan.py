@@ -71,6 +71,26 @@ class Leg:
 ISTANBUL_ANKARA = Leg("Istanbul", 41.0082, 28.9784,
                       "Ankara", 39.9334, 32.8597, speed_kmh=800.0)
 
+# A few named places so the CLI is usable without looking up coordinates.
+PLACES = {
+    "istanbul": (41.0082, 28.9784),
+    "ankara": (39.9334, 32.8597),
+    "izmir": (38.4237, 27.1428),
+    "antalya": (36.8969, 30.7133),
+    "trabzon": (41.0015, 39.7178),
+    "london": (51.5072, -0.1276),
+    "athens": (37.9838, 23.7275),
+    "dubai": (25.2048, 55.2708),
+}
+
+
+def leg_from_names(a: str, b: str, speed_kmh: float = 800.0) -> Leg:
+    ''' Build a Leg from two names in `PLACES` (case-insensitive). '''
+    ka, kb = a.strip().lower(), b.strip().lower()
+    if ka not in PLACES or kb not in PLACES:
+        raise KeyError(f"unknown place; known: {', '.join(sorted(PLACES))}")
+    return Leg(a.title(), *PLACES[ka], b.title(), *PLACES[kb], speed_kmh=speed_kmh)
+
 
 # --------------------------------------------------------------------------- #
 # Sky forecast
@@ -180,3 +200,189 @@ def observation_windows(leg: Leg, day: datetime, step_min: int = 15,
                  best=min(w, key=lambda r: r["fix_sigma_km"]),
                  worst=max(w, key=lambda r: r["fix_sigma_km"]))
             for w in windows]
+
+
+# --------------------------------------------------------------------------- #
+# The mission brief
+#
+# Design note -- WHY THIS GATES ON AVAILABILITY, NOT ON CROSSING ANGLE.
+# A classical two-LOP fix degenerates as the bodies' azimuths converge
+# (`two_lop_sigma_km` blows up as 1/sin T).  The study's full stack does NOT:
+# ablating the Istanbul->Ankara leg, an ALTITUDE-ONLY fix degraded 76 -> 326 km
+# rms between a 89-deg and a 6-deg crossing, while the full stack (IMU +
+# differential Sun-Moon dq + parallactic + heading) stayed 6.4 -> 5.7 km, i.e.
+# flat.  So the planner's job is NOT to hunt for a 90-deg crossing; it is to
+# answer the binary question "is the Moon available at all?" and to hand the crew
+# the window.  The crossing angle is reported for information only.
+# --------------------------------------------------------------------------- #
+
+# Expected fix accuracy, from the air-regime study runs on this leg (5 seeds,
+# 12 shots, 30 km DR prior, full stack).  SIMULATION figures -- the on-device
+# tilt floor must still be calibrated before quoting these operationally.
+FIX_RMS_SUN_MOON_KM = 5.5      # observed 3.8-6.4 across geometries
+FIX_RMS_SUN_ONLY_KM = 5.1      # latitude-strong; longitude leans on the prior
+MIN_USABLE_ALT_DEG = 10.0      # below this, refraction model error grows fast
+ZENITH_CAUTION_DEG = 85.0      # near-overhead: azimuth (LOP direction) is soft
+
+
+class MissionBrief:
+    ''' The per-leg planning product. '''
+
+    def __init__(self, leg, day, windows, moon_available, fix_mode,
+                 expected_rms_km, recommended, warnings, elong_deg, illum):
+        self.leg = leg
+        self.day = day
+        self.windows = windows
+        self.moon_available = moon_available
+        self.fix_mode = fix_mode                  # "sun+moon" | "sun-only"
+        self.expected_rms_km = expected_rms_km
+        self.recommended = recommended            # best window dict or None
+        self.warnings = warnings
+        self.elong_deg = elong_deg
+        self.illum = illum
+
+
+def plan_leg(leg: Leg, day: datetime, step_min: int = 15,
+             sigma_alt_arcmin: float = 2.0,
+             min_alt_deg: float = MIN_USABLE_ALT_DEG) -> MissionBrief:
+    ''' Produce the mission brief for `leg` on `day`.
+
+        The primary output is the binary Moon-availability flag plus the
+        both-bodies-up windows; the recommended window is simply the LONGEST one
+        (most shot opportunities), not the one with the best crossing angle.
+    '''
+    from .optical_attitude import moon_elongation_deg, moon_illuminated_fraction
+
+    day = day.replace(hour=0, minute=0, second=0, microsecond=0)
+    noon_iso = _iso(day + timedelta(hours=12))
+    elong = moon_elongation_deg(noon_iso)
+    illum = moon_illuminated_fraction(noon_iso)
+
+    windows = observation_windows(leg, day, step_min=step_min,
+                                  sigma_alt_arcmin=sigma_alt_arcmin,
+                                  min_alt_deg=min_alt_deg)
+    moon_available = bool(windows)
+    # Recommend the LONGEST window: more chances to shoot, and the fix quality is
+    # geometry-insensitive (see the design note above).
+    recommended = (max(windows, key=lambda w: (w["end"] - w["start"]).total_seconds())
+                   if windows else None)
+
+    warnings = []
+    if not moon_available:
+        warnings.append(
+            f"Moon NOT usable today (elongation {elong:.0f} deg, illuminated "
+            f"{illum:.0%}): it is never above {min_alt_deg:.0f} deg while the Sun "
+            f"is. Plan a SUN-ONLY sight: a strong latitude line, with longitude "
+            f"resting on the dead-reckoned prior.")
+    if illum < 0.03 or illum > 0.98:
+        warnings.append(
+            f"Moon is near new/full (illuminated {illum:.0%}): the bright-limb "
+            f"axis is unusable, so the differential Sun-Moon dq factor -- the "
+            f"horizon-free observable -- is degraded.")
+    # Sun near the zenith softens the LOP direction (azimuth ill-defined).
+    lat, lon = leg.position_at(0.5)
+    peak = max((sky_at(lat, lon, day + timedelta(minutes=step_min * i))["Sun"]["alt_app"]
+                for i in range(int(24 * 60 / step_min) + 1)))
+    if peak > ZENITH_CAUTION_DEG:
+        warnings.append(
+            f"Sun peaks at {peak:.1f} deg (near zenith): the altitude circle is "
+            f"small and its azimuth -- the LOP direction -- is poorly conditioned. "
+            f"Prefer shots away from local noon.")
+
+    return MissionBrief(
+        leg=leg, day=day, windows=windows, moon_available=moon_available,
+        fix_mode="sun+moon" if moon_available else "sun-only",
+        expected_rms_km=(FIX_RMS_SUN_MOON_KM if moon_available
+                         else FIX_RMS_SUN_ONLY_KM),
+        recommended=recommended, warnings=warnings,
+        elong_deg=elong, illum=illum)
+
+
+def find_next_opportunity(leg: Leg, start_day: datetime, max_days: int = 30,
+                          min_window_min: int = 60) -> list:
+    ''' Scan forward for days offering a usable Sun+Moon window of at least
+        `min_window_min`.  Returns a list of (day, brief) for the usable days --
+        the "if the mission can slip, fly then" product. '''
+    out = []
+    for d in range(max_days):
+        day = start_day + timedelta(days=d)
+        brief = plan_leg(leg, day, step_min=20)
+        if brief.recommended is not None:
+            w = brief.recommended
+            if (w["end"] - w["start"]).total_seconds() / 60.0 >= min_window_min:
+                out.append((day, brief))
+    return out
+
+
+def brief_text(brief: MissionBrief) -> str:
+    ''' Render the mission brief as a readable block. '''
+    leg = brief.leg
+    L = []
+    L.append(f"MISSION BRIEF  {leg.name_a} -> {leg.name_b}   {brief.day:%Y-%m-%d} (UTC)")
+    L.append(f"  Leg: {leg.distance_km:.0f} km, {leg.duration_h*60:.0f} min "
+             f"at {leg.speed_kmh:.0f} km/h")
+    L.append(f"  Moon: elongation {brief.elong_deg:.0f} deg, illuminated {brief.illum:.0%}")
+    L.append("")
+    flag = "YES" if brief.moon_available else "NO"
+    L.append(f"  MOON AVAILABLE (daytime, with the Sun): {flag}")
+    L.append(f"  Fix mode: {brief.fix_mode.upper()}   "
+             f"expected ~{brief.expected_rms_km:.1f} km rms (simulation)")
+    if brief.fix_mode == "sun-only":
+        L.append("    NOTE: one body = one line of position. Latitude is strong; "
+                 "longitude comes from the prior, not from the sky.")
+    L.append("")
+    if brief.windows:
+        L.append("  Both-bodies-up windows (UTC):")
+        for w in brief.windows:
+            mins = (w["end"] - w["start"]).total_seconds() / 60.0
+            star = "  <== RECOMMENDED" if w is brief.recommended else ""
+            L.append(f"    {w['start']:%H:%M}-{w['end']:%H:%M}  ({mins:>4.0f} min)  "
+                     f"crossing {abs(w['best']['daz']):5.1f}-{abs(w['worst']['daz']):5.1f} deg{star}")
+        L.append("    (crossing angle is informational: the fused fix is "
+                 "geometry-insensitive)")
+    else:
+        L.append("  Both-bodies-up windows: NONE")
+    if brief.warnings:
+        L.append("")
+        L.append("  WARNINGS:")
+        for w in brief.warnings:
+            L.append(f"    - {w}")
+    return "\n".join(L)
+
+
+def _main(argv=None):
+    import argparse
+    p = argparse.ArgumentParser(
+        description="Celestial mission planner: is the Moon available on this "
+                    "leg, and when?")
+    p.add_argument("--from", dest="a", default="Istanbul")
+    p.add_argument("--to", dest="b", default="Ankara")
+    p.add_argument("--date", default=None, help="YYYY-MM-DD (UTC), default today")
+    p.add_argument("--speed-kmh", type=float, default=800.0)
+    p.add_argument("--step-min", type=int, default=15)
+    p.add_argument("--next", action="store_true",
+                   help="if the Moon is unavailable, scan ahead for the next "
+                        "usable days")
+    p.add_argument("--scan-days", type=int, default=30)
+    args = p.parse_args(argv)
+
+    leg = leg_from_names(args.a, args.b, speed_kmh=args.speed_kmh)
+    day = (datetime.strptime(args.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+           if args.date else datetime.now(timezone.utc))
+    brief = plan_leg(leg, day, step_min=args.step_min)
+    print(brief_text(brief))
+
+    if args.next and not brief.moon_available:
+        print("\n  NEXT USABLE DAYS (>= 60 min window):")
+        found = find_next_opportunity(leg, day, max_days=args.scan_days)
+        if not found:
+            print(f"    none within {args.scan_days} days")
+        for d, br in found[:8]:
+            w = br.recommended
+            mins = (w["end"] - w["start"]).total_seconds() / 60.0
+            print(f"    {d:%Y-%m-%d}  {w['start']:%H:%M}-{w['end']:%H:%M} UTC "
+                  f"({mins:>4.0f} min), illuminated {br.illum:.0%}")
+
+
+if __name__ == "__main__":
+    _main()

@@ -828,6 +828,49 @@ class TestMissionPlan(unittest.TestCase):
             if r["moon_alt"] > 5:
                 self.assertGreater(r["moon_parallax_deg"], 0.0)
 
+    # --- the planner product: availability gate, windows, brief -------------
+
+    def test_leg_from_names_and_unknown_place(self):
+        from imu_fusion.mission_plan import leg_from_names
+        leg = leg_from_names("Istanbul", "Ankara")
+        self.assertTrue(300 < leg.distance_km < 400)
+        with self.assertRaises(KeyError):
+            leg_from_names("Istanbul", "Atlantis")
+
+    def test_plan_flags_moon_unavailable_near_full(self):
+        ''' 2026-07-28: the Moon is at ~167 deg elongation and never shares the
+            daytime sky with the Sun -> the brief must say SUN-ONLY and warn. '''
+        from datetime import datetime, timezone
+        from imu_fusion.mission_plan import ISTANBUL_ANKARA as leg, plan_leg, brief_text
+        b = plan_leg(leg, datetime(2026, 7, 28, tzinfo=timezone.utc), step_min=20)
+        self.assertFalse(b.moon_available)
+        self.assertEqual(b.fix_mode, "sun-only")
+        self.assertEqual(b.windows, [])
+        self.assertIsNone(b.recommended)
+        self.assertTrue(any("SUN-ONLY" in w for w in b.warnings))
+        self.assertIn("MOON AVAILABLE (daytime, with the Sun): NO", brief_text(b))
+
+    def test_plan_finds_window_and_recommends_the_longest(self):
+        ''' 2026-08-18: a wide daytime Sun+Moon window over the leg. '''
+        from datetime import datetime, timezone
+        from imu_fusion.mission_plan import ISTANBUL_ANKARA as leg, plan_leg
+        b = plan_leg(leg, datetime(2026, 8, 18, tzinfo=timezone.utc), step_min=20)
+        self.assertTrue(b.moon_available)
+        self.assertEqual(b.fix_mode, "sun+moon")
+        self.assertTrue(b.windows)
+        longest = max(b.windows,
+                      key=lambda w: (w["end"] - w["start"]).total_seconds())
+        self.assertIs(b.recommended, longest)     # longest, NOT best crossing
+
+    def test_find_next_opportunity_after_a_blank_day(self):
+        from datetime import datetime, timezone
+        from imu_fusion.mission_plan import ISTANBUL_ANKARA as leg, find_next_opportunity
+        found = find_next_opportunity(leg, datetime(2026, 7, 28, tzinfo=timezone.utc),
+                                      max_days=14, min_window_min=60)
+        self.assertTrue(found, "expected usable days within two weeks")
+        for day, brief in found:
+            self.assertTrue(brief.moon_available)
+
 
 if __name__ == "__main__":
     unittest.main()
