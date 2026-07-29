@@ -1918,17 +1918,17 @@ class TestResectionGeometry(unittest.TestCase):
         """
         from imu_fusion.resection_geometry import focal_bounds_from_relief
         # 129.4 px of crest once the near rock point is masked, against the
-        # angular reliefs the DEM actually renders over that 42 deg arc at
-        # shoreline candidates -- 1.0 deg where the far range is across open
-        # water, up to 6 deg where the camera stands under close terrain.
-        lo, hi = focal_bounds_from_relief(129.4, [1.00, 1.02, 2.58, 5.99])
+        # extremes of the angular relief the DEM renders over that 42 deg arc
+        # across all 140 shoreline candidates: 0.84 deg where the far range is
+        # across open water, 19.09 where the camera stands under close terrain.
+        lo, hi = focal_bounds_from_relief(129.4, [0.84, 1.02, 5.99, 19.09])
         self.assertLess(lo, 143.0)
         self.assertGreater(hi, 143.0)
         self.assertLess(hi, 510.0)
         # The upper bound is the one that does the work, and it must come from
-        # the SMALLEST relief; taking the largest would put it at ~17 and exclude
+        # the SMALLEST relief; taking the largest would put it near 5 and exclude
         # the answer outright.
-        self.assertAlmostEqual(hi, 129.4 / (1.00 * 0.75), places=6)
+        self.assertAlmostEqual(hi, 129.4 / (0.84 * 0.75), places=6)
 
     def test_focal_bounds_invert_relief_to_scale(self):
         """More degrees for the same pixels is a SHORTER focal length.

@@ -144,6 +144,13 @@ def focal_absorbed_radial(features, eye_m, k=K_REFRACTION):
         while the fitted scale simply rescaled to compensate.  Position was not
         merely imprecise, it was absent.
 
+        This is a FIRST-ORDER statement and must not be read as "unsolvable".
+        Bounding the scale physically -- see `focal_bounds_from_relief` -- leaves
+        enough second-order signal to localise the same scene to 0.3 km on a 19
+        degree field, where the same search with the scale free railed and
+        localised nothing.  Quantify the degeneracy with this function; do not
+        let it talk you into an unrestricted search.
+
         Computed as the residual of regressing each feature's d(elevation)/
         d(range) against its elevation -- the component a common scale cannot
         explain.
@@ -193,8 +200,11 @@ def focal_bounds_from_relief(relief_px, terrain_reliefs_deg, margin=0.25):
         is set by the SMALLEST relief in `terrain_reliefs_deg` -- a robust number,
         since it only asserts that no candidate position sees less than that.  The
         lower bound is set by the largest relief and is usually far too loose to
-        bind: over the Tahoe candidate set the bracket came out 17-173 px/deg,
-        and the solution sat at 143.
+        bind.  Over the whole Tahoe candidate set the bracket came out 5-205
+        px/deg -- a 40-fold span, lower bound 30x below the answer -- and the
+        search still converged to within 0.3 km of the hand-tuned result.  A loose
+        bracket is not a weak one, so widen rather than tune: the value comes from
+        excluding the unphysical long-focal rail, not from being tight.
     '''
     relief_px = float(relief_px)
     r = np.asarray([float(v) for v in terrain_reliefs_deg], dtype=float)

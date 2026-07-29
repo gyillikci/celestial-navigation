@@ -886,10 +886,14 @@ the relief — 129 px of crest, once the near rock point is masked — and the D
 says how many degrees that can be.  The binding side is the *upper* bound on *f*,
 because railing to 510 is the failure: `f_hi = relief_px / (smallest angular
 relief any candidate shows)`.  Rendered over the 42° arc, no position in the
-basin subtends less than **1.00°**, so with a 25% margin *f* ≤ **173 px/deg**.
-The run reported here used a hand-set 100–176; the mechanically derived bracket
-is 17–173, and the lower bound never binds — the solution sits at 143, near the
-top.  The same search then converged:
+basin subtends less than **0.84°**, so with a 25% margin *f* ≤ **205 px/deg**.
+The run reported here used a hand-set 100–176, so the obvious objection is that
+the bracket was drawn knowing the answer.  It was not: rendering all 140
+candidates and letting `focal_bounds_from_relief` do it blind gives **5–205
+px/deg** — a 40-fold span, with a lower bound 30× below the solution — and the
+search *still* converges, to 39.2250 N 120.0100 W, 0.28 km from the hand-tuned
+answer, separation 2.24× against 2.90×.  Only the upper bound ever binds.  The
+same search then converged:
 
 | rms | position | ground | azimuth | field | roll |
 |---|---|---|---|---|---|
@@ -943,10 +947,42 @@ rather than rediscovered.  Masking matters: unmasked, the near rock point and it
 pine take the relief from 129 px to 242 px and drive the bracket low, which
 pushes the solved position outward.
 
-**The revised lesson.** An unknown scale is not the same as an unconstrained one.
-`focal_absorbed_radial` correctly says radial position is degenerate with focal
-length *to first order*; what the original file shows is that a wide enough frame
-carries enough departure from proportionality to break the degeneracy — provided
-the search is not simultaneously allowed to rail the scale to an unphysical
-value.  Denver needed a near landmark because its field was 5.4°.  Tahoe did not,
-because its field was 42°.
+### Which change did it: the frame, or the bound?
+
+Two things changed at once — a 19° crop became a 42° frame, and the scale gained
+a bound.  Reporting both and claiming the win would not say which mattered, so
+run the 2×2 on the *same* extraction, scored on **separation** (best candidate
+more than 10 km from the winner, divided by the winner) rather than on the
+winning residual:
+
+| | scale free, 60–520 | scale bounded, 100–176 |
+|---|---|---|
+| **narrow 19°** (2 717 cols) | 1.34′, *f* railed at 516, **1.17×** | 1.79′, *f* 144, **2.37×** |
+| **wide 42°** (5 065 cols) | 2.20′, *f* railed at 516, **1.04×** | 2.50′, *f* 144, **2.90×** |
+
+**The bound is what does the work.**  Both bounded cells land within **0.3 km** of
+the converged answer; both free cells rail the scale and separate by essentially
+nothing — and the wide free cell puts its best fit **14.4 km** away, so more data
+with an unconstrained nuisance parameter made it *worse*, not better.  Width is
+worth a further 2.37 → 2.90 in separation: real, and secondary.
+
+Note that the residual column runs backwards.  The free-scale searches fit
+**better** (1.34′ against 1.79′) while localising worse.  That is exactly what an
+unconstrained nuisance parameter buys — residual, not position — and it is why a
+winning rms must never be reported as evidence of a fix without the separation
+beside it.
+
+**This corrects the framing above.**  The crop was not the primary cause of the
+screen photo's failure; the free scale was.  Restricted to the same central 19°,
+this extraction still fixes the position to 0.3 km once *f* is bounded.  The crop
+cost precision and separation — it did not cost the fix.  What the screen photo
+added on top was its own systematics (keystone, moiré, the LCD's pixel grid) and
+a search allowed to rail.
+
+**The revised lesson.**  An unknown scale is not the same as an unconstrained
+one.  `focal_absorbed_radial` is right that radial position is degenerate with
+focal length *to first order*; the mistake was letting that justify an
+unrestricted search.  The degeneracy is first-order, and a physically bounded
+scale leaves enough second-order signal to localise even a 19° field.  Denver
+needed a near landmark not because its field was 5.4° as such, but because
+nothing there bounded the scale independently — the near tower did that job.
