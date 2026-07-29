@@ -221,6 +221,60 @@ def focal_bounds_from_relief(relief_px, terrain_reliefs_deg, margin=0.25):
     return relief_px / hi_deg, relief_px / lo_deg
 
 
+def waterline_range(depression_deg, eye_m, k=K_REFRACTION, d_max_km=60.0,
+                    n=6000):
+    ''' Range to a far shoreline from how far its waterline sits below level.
+
+        The far edge of a lake or bay is a point at the observer's OWN water
+        level, so its depression is pure geometry -- no DEM, no landmark
+        identification, no scale.  That makes it the one observable in a terrain
+        photograph that can break the focal-length degeneracy the way Denver's
+        near tower did, which is why it is worth having.
+
+        It comes with a trap.  The depression is the sum of an eye-height term
+        that FALLS with range (h/d) and a curvature term that GROWS with it
+        (d/2R_eff), so it is not monotonic: it reaches a minimum magnitude at
+        sqrt(2 h R_eff) and increases on both sides.  Two consequences, both
+        returned:
+
+        * at that range the derivative is zero and the measurement carries NO
+          range information at all -- a blind spot, 4.8 km for a standing
+          observer at 1.6 m, 12 km from a 10 m deck;
+        * every depression except the extremum matches TWO ranges, one inside
+          the blind range and one outside, and nothing in the angle itself says
+          which.
+
+        Returns dict(ranges_km, blind_range_km, blind_depression_deg,
+        sensitivity_deg_per_km) with one entry in `ranges_km` per solution, in
+        increasing order.  An empty `ranges_km` means the depression is smaller
+        than anything achievable at this eye height -- usually a sign the
+        horizon reference, not the range, is wrong.
+    '''
+    eye_m = float(eye_m)
+    if eye_m <= 0:
+        raise ValueError('eye height must be above the water surface')
+    d = np.linspace(d_max_km / n, d_max_km, n)
+    a = np.array([elevation_angle_deg(x, 0.0, eye_m, k) for x in d])
+    i = int(np.argmax(a))               # least depressed
+    want = float(depression_deg)
+    out = []
+    for lo, hi in ((0, i + 1), (i, n)):
+        seg_d, seg_a = d[lo:hi], a[lo:hi]
+        if seg_d.size < 2:
+            continue
+        j = int(np.argmin(np.abs(seg_a - want)))
+        # only accept a genuine crossing, not the nearest point on a branch
+        # that never reaches the requested angle
+        if seg_a.min() - 1e-9 <= want <= seg_a.max() + 1e-9:
+            out.append(float(seg_d[j]))
+    out = sorted(set(round(v, 6) for v in out))
+    grad = [float((elevation_angle_deg(v + 0.05, 0.0, eye_m, k)
+                   - elevation_angle_deg(v - 0.05, 0.0, eye_m, k)) / 0.1)
+            for v in out]
+    return dict(ranges_km=out, blind_range_km=float(d[i]),
+                blind_depression_deg=float(a[i]), sensitivity_deg_per_km=grad)
+
+
 def position_dilution(features, sigma_deg, eye_m, k=K_REFRACTION,
                       biases_free=True, focal_free=False):
     ''' Expected 1-sigma position error, km, from a given angular accuracy.

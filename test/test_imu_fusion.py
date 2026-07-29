@@ -1908,6 +1908,44 @@ class TestResectionGeometry(unittest.TestCase):
         self.assertAlmostEqual(unknown["across_km"], known["across_km"], places=6)
         self.assertGreater(focal_absorbed_radial(tahoe, 1899.0), 0.0)
 
+    def test_waterline_depression_is_ambiguous_about_range(self):
+        """One depression, two ranges -- and a blind spot between them.
+
+        The far waterline looks like the ideal scale-breaking observable: a point
+        at the observer's own water level, so no DEM and no landmark needed.  But
+        the eye-height term falls with range while the curvature term grows, so
+        the depression is not monotonic.  Treating it as a rangefinder without
+        resolving the branch puts the camera at the wrong one of two places.
+        """
+        from imu_fusion.resection_geometry import waterline_range
+        r = waterline_range(-3.27 / 60.0, 1.6)
+        self.assertEqual(len(r["ranges_km"]), 2)
+        near, far = r["ranges_km"]
+        self.assertLess(near, r["blind_range_km"])
+        self.assertGreater(far, r["blind_range_km"])
+        self.assertAlmostEqual(near, 1.96, places=1)
+        self.assertAlmostEqual(far, 11.99, places=1)
+        # the blind range rises with eye height, so a deck does not escape it
+        self.assertGreater(waterline_range(-6.68 / 60.0, 10.0)["blind_range_km"],
+                           r["blind_range_km"])
+
+    def test_waterline_near_branch_carries_the_range_information(self):
+        """Same near/far lesson as Denver, in a different observable.
+
+        On the far branch the depression changes by 0.2 arcmin per km, so the
+        2.18 arcmin residual measured on the Tahoe wallpaper is worth about 10 km
+        of range -- useless.  The near branch is several times steeper.
+        """
+        from imu_fusion.resection_geometry import waterline_range
+        r = waterline_range(-3.27 / 60.0, 1.6)
+        near_s, far_s = (abs(g) for g in r["sensitivity_deg_per_km"])
+        self.assertGreater(near_s, 4.0 * far_s)
+        self.assertLess(abs(far_s) * 60.0, 0.5)          # arcmin per km
+        # a depression shallower than the extremum is unreachable at this height
+        self.assertEqual(waterline_range(0.5, 1.6)["ranges_km"], [])
+        with self.assertRaises(ValueError):
+            waterline_range(-0.05, 0.0)
+
     def test_focal_bounds_bracket_the_measured_tahoe_scale(self):
         """The bracket must contain the answer and still exclude the failure.
 
