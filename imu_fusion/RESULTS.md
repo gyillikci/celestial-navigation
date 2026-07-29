@@ -1033,3 +1033,70 @@ answer: its separation is characteristic of a solve that has found the right
 place, not of one that has not.  The **≈1 km** claim stands — supported now by
 more than the internal spread of the fit, and still not to be confused with a
 measured error.
+
+## Waterline to summit: the observable that was in the frame all along
+
+The far waterline's own depression is a poor rangefinder — its entire signal is
+the curvature drop, worth 0.20′/km on the far branch, so the wallpaper's 2.18′
+residual buys about 11 km.  Measuring instead from the **waterline at a
+mountain's foot up to its summit** changes the lever from the curvature of the
+earth to the height of the mountain, and that is a different instrument:
+
+| peak | range | above lake | extent | sensitivity | range error at 2.18′ |
+|---|---|---|---|---|---|
+| Rubicon Pk | 26.3 km | 917 m | 2.00° | **4.55′/km** | **0.48 km** |
+| Jakes Pk | 25.0 km | 858 m | 1.96° | 4.71′/km | 0.46 km |
+| Ellis Pk | 23.8 km | 748 m | 1.80° | 4.55′/km | 0.48 km |
+| *bare waterline, far branch* | | | | *0.20′/km* | *10.9 km* |
+
+**23× better** — but the size of the signal is not the point.  What matters is
+what *cancels*, because both angles are read in one image at one azimuth:
+
+- **eye height** enters as `(H−E)/d − (L−E)/d`, and *E* drops out;
+- **pitch bias** is a common vertical offset, differenced away exactly;
+- **curvature** is `−d_s/2R + d_w/2R`, zero when foot and summit share a range;
+- **refraction** is very nearly the same air path, so mostly common-mode.
+
+The pitch cancellation is the valuable one.  A free vertical offset is precisely
+what absorbs radial position in a skyline fit — it is nuisance parameter number
+two — and this observable is blind to it.  The focal length does *not* cancel,
+since the extent is still measured in pixels; but ranges to three or more summits
+determine position **and** scale together, which a skyline shape alone cannot.
+
+**The setback is the only thing that genuinely breaks it**, and it is forgiving.
+The residual term is `setback/(2 R_eff)`:
+
+| summit set back from the shore | extent changes by | range bias |
+|---|---|---|
+| 1 km | −0.23′ | 0.05 km |
+| 2 km | −0.45′ | 0.10 km |
+| 8 km | −1.79′ | 0.39 km |
+
+Even 8 km of setback stays below the noise on a real photograph.
+
+### Tested out-of-sample on the wallpaper
+
+The resection was fitted to the **crest only**.  The far shoreline — the west
+shore meeting the lake at 20 km — was never used, so its predicted row is a
+genuine prediction rather than a fit.
+
+| | |
+|---|---|
+| predicted row, from the crest solve | 1691 |
+| measured row, red-channel water edge | 1696 |
+| **out-of-sample residual** | **+1.93′ mean, 5.10′ rms over 141 columns** |
+| as a range error at 4.55′/km | **0.42 km** |
+
+Five pixels out of 3384.  This is the strongest independent evidence the Tahoe
+position is right: nothing about the far shore entered the search, and the solve
+places it correctly.
+
+**Two extraction traps, both worth recording.**  *Blueness* is the intuitive
+discriminator for water and it is wrong here — atmospheric haze makes the distant
+range as blue as the lake (both at `b−(r+g)/2` of 55–65), so a blueness edge
+lands 135 px high, on a snow line.  **Red** separates cleanly and for a physical
+reason: deep water absorbs red almost completely (5–30 here) while rock, snow and
+forest all reflect it (50–210).  And going down the frame the order is mountain
+foot, far waterline, open lake, boulders, nearer lake — so the **first** water
+below the range is the far shore.  Taking the lowest water run instead latches
+onto water beyond the foreground boulders, which put the first attempt 17′ low.

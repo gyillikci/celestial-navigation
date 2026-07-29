@@ -1908,6 +1908,43 @@ class TestResectionGeometry(unittest.TestCase):
         self.assertAlmostEqual(unknown["across_km"], known["across_km"], places=6)
         self.assertGreater(focal_absorbed_radial(tahoe, 1899.0), 0.0)
 
+    def test_waterline_to_summit_beats_the_bare_waterline(self):
+        """The lever is the mountain, not the curvature of the earth.
+
+        Measured on Rubicon Peak from the solved Tahoe position: 917 m above the
+        lake at 26.3 km gives 4.55 arcmin of extent per km of range, against 0.20
+        for the waterline's own depression.  If this ratio ever collapses the
+        observable is not worth extracting.
+        """
+        from imu_fusion.resection_geometry import (waterline_to_summit,
+                                                   waterline_range)
+        d, H, eye = 26.3, 917.0, 1.6
+        grad = abs(waterline_to_summit(d + 0.5, H, eye)
+                   - waterline_to_summit(d - 0.5, H, eye)) * 60.0
+        self.assertGreater(grad, 4.0)
+        bare = abs(waterline_range(-3.27 / 60.0, eye)["sensitivity_deg_per_km"][1]) * 60.0
+        self.assertGreater(grad, 20.0 * bare)
+        self.assertAlmostEqual(waterline_to_summit(d, H, eye), 2.0, places=1)
+
+    def test_waterline_to_summit_is_blind_to_eye_height(self):
+        """Eye height and a common pitch offset both cancel in the difference.
+
+        That is the whole point: a free vertical offset is what absorbs radial
+        position in a skyline fit, so an observable immune to it supplies exactly
+        the axis the skyline cannot.  Only the setback survives, and weakly.
+        """
+        from imu_fusion.resection_geometry import waterline_to_summit
+        base = waterline_to_summit(26.3, 917.0, 1.6)
+        for eye in (0.5, 5.0, 30.0):
+            self.assertAlmostEqual(waterline_to_summit(26.3, 917.0, eye), base,
+                                   places=2)
+        # setback breaks it, but only at setback/(2 R_eff)
+        far = waterline_to_summit(26.3, 917.0, 1.6, setback_km=8.0)
+        self.assertLess(abs(far - base) * 60.0, 2.2)          # arcmin
+        self.assertGreater(abs(far - base) * 60.0, 1.0)
+        with self.assertRaises(ValueError):
+            waterline_to_summit(0.0, 917.0, 1.6)
+
     def test_waterline_depression_is_ambiguous_about_range(self):
         """One depression, two ranges -- and a blind spot between them.
 

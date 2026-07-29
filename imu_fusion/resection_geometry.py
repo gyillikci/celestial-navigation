@@ -275,6 +275,48 @@ def waterline_range(depression_deg, eye_m, k=K_REFRACTION, d_max_km=60.0,
                 blind_depression_deg=float(a[i]), sensitivity_deg_per_km=grad)
 
 
+def waterline_to_summit(distance_km_, height_above_water_m, eye_above_water_m,
+                        setback_km=0.0, k=K_REFRACTION):
+    ''' Angular extent from the waterline at a mountain's foot to its summit.
+
+        The strongest range observable a lake or coastal photograph contains, and
+        far better than the waterline's own depression, because the lever is the
+        mountain's height above the water instead of the curvature of the earth.
+        Measured on the Tahoe wallpaper's peaks: 4.55 arcmin per km of range,
+        against 0.20 for the bare waterline -- a factor of 23.
+
+        What makes it worth having is not the size of the signal but WHAT CANCELS
+        in it.  Both angles are read in one image at one azimuth, so:
+
+          eye height   enters as (H-E)/d - (L-E)/d, and E drops out
+          pitch bias   is a common vertical offset, differenced away exactly
+          curvature    -d_s/2R + d_w/2R, zero when foot and summit share a range
+          refraction   is very nearly the same air path, so mostly common-mode
+
+        The pitch cancellation is the valuable one: a free vertical offset is
+        what absorbs radial position in a skyline fit, and this observable is
+        blind to it.  What does NOT cancel is the focal length -- the extent is
+        still measured in pixels -- but ranges to three or more summits determine
+        position and scale together, which a skyline shape alone cannot.
+
+        `setback_km` is how far the summit stands behind the shore, the one thing
+        that genuinely breaks the cancellation.  It is remarkably forgiving: the
+        residual term is setback/(2 R_eff), so even 8 km of setback at 26 km range
+        biases the extent by only 1.8 arcmin, below the noise on a real photo.
+
+        Returns the extent in degrees.  Pair it with `waterline_range` when the
+        summit is unidentified and only the shoreline is measurable.
+    '''
+    d = float(distance_km_)
+    if d <= 0:
+        raise ValueError('distance must be positive')
+    eye = float(eye_above_water_m)
+    d_w = max(1e-3, d - float(setback_km))
+    summit = elevation_angle_deg(d, float(height_above_water_m), eye, k)
+    foot = elevation_angle_deg(d_w, 0.0, eye, k)
+    return float(summit - foot)
+
+
 def position_dilution(features, sigma_deg, eye_m, k=K_REFRACTION,
                       biases_free=True, focal_free=False):
     ''' Expected 1-sigma position error, km, from a given angular accuracy.
