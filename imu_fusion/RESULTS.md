@@ -986,3 +986,50 @@ unrestricted search.  The degeneracy is first-order, and a physically bounded
 scale leaves enough second-order signal to localise even a 19° field.  Denver
 needed a near landmark not because its field was 5.4° as such, but because
 nothing there bounded the scale independently — the near tower did that job.
+
+### The positional error, measured against known truth
+
+Everything above — 2.12′ rms, a 600 m spread of top fits, 2.90× separation — is
+*internal to the fit*, and a fit can be tight and wrong.  For the wallpaper there
+is no ground truth to difference against: Apple does not publish the location and
+the file has no EXIF.  So run the identical search where truth **is** known:
+synthesise the observation from the DEM at six known shoreline points, corrupt it
+with the error actually measured on the wallpaper — 2.18′ rms at **n_eff = 33**,
+generated correlated, because white noise at that level would be trivially
+beatable and would not mimic a position shift — and difference recovered against
+true.
+
+| truth | recovered | error | rms | separation |
+|---|---|---|---|---|
+| 39.2250 −120.0100 | 39.2250 −120.0100 | **0.00 km** | 2.98′ | 2.49× |
+| 39.2350 −120.0200 | 39.2350 −120.0200 | **0.00 km** | 3.19′ | 2.22× |
+| 39.2400 −119.9650 | 39.2450 −119.9650 | 0.56 km | 3.03′ | 2.53× |
+| 39.1950 −119.9300 | 39.2050 −119.9300 | 1.11 km | 2.78′ | 2.15× |
+| 39.1650 −120.1450 | 39.1650 −120.1450 | **0.00 km** | 3.16′ | 2.52× |
+| 39.0750 −120.1500 | 39.0750 −120.1500 | **0.00 km** | 2.39′ | 3.65× |
+
+Median 0.00 km, mean **0.28 km**, worst **1.11 km** — four of six land in the
+correct cell, the other two one and two grid steps out.
+
+**Read it as a floor, not as the answer.**  Three things flatter it:
+
+1. **DEM error cancels exactly.**  The same DEM generates the observation and
+   scores the candidates, so SRTM's own error contributes nothing.  In the real
+   solve it contributes a great deal: 10 m of height error at 25 km subtends
+   **1.4′**, and 16 m subtends 2.2′ — the same order as the entire measured
+   residual.  The wallpaper fit is essentially at the DEM noise floor, and that
+   error is spatially correlated, which is the most likely origin of n_eff = 33.
+2. **The truth points sit on the search grid**, so a perfect search scores exactly
+   zero and the 500 m cell size cannot show up as error.
+3. **The noise is zero-mean and stationary.**  A real systematic — an uncorrected
+   pitch bias, a scale error, snow or canopy raising a crest — shifts position
+   coherently and is not represented.
+
+**What it does establish** is the discriminating power.  Separation across the
+six correct solves runs **2.15–3.65×**; the wallpaper's own fit sits at 2.90×,
+inside that band, while the degenerate free-scale searches sat at 1.04–1.17×.
+Without ground truth that is the strongest available statement about the Tahoe
+answer: its separation is characteristic of a solve that has found the right
+place, not of one that has not.  The **≈1 km** claim stands — supported now by
+more than the internal spread of the fit, and still not to be confused with a
+measured error.
