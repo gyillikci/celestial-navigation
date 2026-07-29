@@ -54,89 +54,21 @@ def extract_skyline(path, y_top=330, y_bot=660, drop=13.0, smooth=9,
                     sky_min=105.0, jump=6.0, win=45):
     ''' Sub-pixel terrain/sky boundary row for every column, NaN where unfound.
 
-        Uses the RED channel.  Through summer haze a distant ridge is only ~30 DN
-        darker than the sky in red but barely 8 DN in blue, because the haze that
-        washes out the ridge is itself blue -- so red carries nearly four times
-        the contrast of a luminance image.
+        Thin wrapper over `skyline_extract`, which now owns the detectors and the
+        three corrections they need.  Kept as a named entry point because the
+        defaults here are tuned for Theodolite frames specifically: an 8x zoom on
+        hazed Anatolian ridges, seen through the app's translucent overlay.
 
-        The sky reference is taken PER COLUMN from the top of the band.  That is
-        what lets the extractor work straight through the app's translucent
-        overlay: a uniform grey wash lifts the reference and the ridge together
-        and cancels.  Masking every column carrying overlay furniture instead
-        threw away two thirds of the frame and, with it, the azimuth baseline.
-
-        Only genuinely opaque obstructions are rejected, and they are found in
-        the data rather than hand-drawn: a dark pole drags the sky reference
-        below `sky_min`, and anything else makes the detected row jump more than
-        `jump` pixels away from its neighbours.
+        The RED channel is the right one for that scene -- through summer haze a
+        distant ridge is ~30 DN darker than the sky in red but barely 8 DN in
+        blue, because the haze washing it out is itself blue.  For a scene with
+        snow, or with anything BRIGHTER than the sky, use
+        `skyline_extract.extract(path)` instead, which models the sky and catches
+        departures in either direction.
     '''
-    from PIL import Image
-    R = np.asarray(Image.open(path).convert("RGB"), float)[:, :, 0]
-    n = R.shape[1]
-    half = smooth // 2
-    band = R[y_top:y_bot, :]
-    # EDGE-REPLICATE.  np.convolve(mode='same') zero-pads, so the first samples
-    # of every smoothed column dive toward zero and mimic a skyline edge at
-    # index 0 -- which any "not at the very top" guard then rejects, silently
-    # discarding the whole column.  It looks exactly like undetectable terrain.
-    pad = np.vstack([np.repeat(band[:1], half, 0), band,
-                     np.repeat(band[-1:], half, 0)])
-    ker = np.ones(smooth) / smooth
-    y = np.full(n, np.nan)
-    for x in range(n):
-        col = np.convolve(pad[:, x], ker, mode="valid")
-        sky = np.median(col[:22])
-        if sky < sky_min:
-            continue
-        below = np.where(col < sky - drop)[0]
-        if len(below) and below[0] > 3:
-            i = below[0]
-            a, b = col[i - 1], col[i]
-            frac = 0.0 if b == a else (sky - drop - a) / (b - a)
-            y[x] = y_top + (i - 1) + frac
-    for _ in range(2):
-        med = np.full(n, np.nan)
-        for x in range(n):
-            w = y[max(0, x - win):min(n, x + win + 1)]
-            w = w[np.isfinite(w)]
-            if len(w) >= 8:
-                med[x] = np.median(w)
-        y[np.isfinite(y) & np.isfinite(med) & (np.abs(y - med) > jump)] = np.nan
-    return _drop_straight_lines(y)
-
-
-def _drop_straight_lines(y, tol=0.6, min_run=45):
-    ''' Discard detections lying on a perfectly horizontal line.
-
-        The app's translucent panels have sharp horizontal top edges, and to a
-        detector looking for "the row where it first gets darker" a panel edge is
-        indistinguishable from a ridge -- same sign, comparable size.  The give-
-        away is not contrast but SHAPE: a panel edge returns the identical
-        sub-pixel row for every one of the two or three hundred columns it spans,
-        and real terrain 50 km away never does that, because at 276 px/deg a
-        third of a pixel is a tenth of an arcminute of relief.
-
-        Left in, these segments are worse than missing data: they are long,
-        confident, and perfectly smooth, so a least-squares fit weights them
-        heavily and quietly drags the horizon toward the app's layout.
-    '''
-    out = y.copy()
-    good = np.isfinite(out)
-    if good.sum() < min_run:
-        return out
-    vals = out[good]
-    order = np.argsort(vals)
-    sv = vals[order]
-    idx = np.where(good)[0][order]
-    i = 0
-    while i < len(sv):
-        j = i
-        while j + 1 < len(sv) and sv[j + 1] - sv[i] <= tol:
-            j += 1
-        if j - i + 1 >= min_run:
-            out[idx[i:j + 1]] = np.nan
-        i = j + 1
-    return out
+    from ..skyline_extract import extract
+    return extract(path, method="channel_drop", y_band=(y_top, y_bot),
+                   drop=drop, smooth=smooth, sky_min=sky_min)
 
 
 def dem_profile(frame, dem, span=9.0, step=0.01, d_max_km=190.0):

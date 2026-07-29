@@ -655,3 +655,81 @@ diagnosis; here, its presence is the cure, and the arc it leaves behind is
 exactly the residual freedom the geometry predicts.
 
 ![Denver resection](results/fig_denver_resection.png)
+
+
+## What the field data changed in the code
+
+Five photographs from three places produced findings that were worth more than
+the fixes they prompted, so both are recorded here and both are now covered by
+tests.
+
+### The observability question now has an answer that costs a second
+
+Both terrain-resection failures were predictable from geometry, and both cost
+hours of grid search to discover instead.  `resection_geometry` makes the
+prediction directly, and reproduces what was measured:
+
+| scene | predicted ellipse | measured |
+|---|---|---|
+| Istanbul, ridges 50–53 km, 0.14° match | 2.4 km × 17 km — *not usable* | search no better than the prior beyond 2 km |
+| Denver, terrain only, 0.019° match | 0.49 km × 15 km — *line of position* | arc ~0.2 km × 11 km |
+| Denver, **plus one tower at 15 km** | 0.01 km × 3.3 km | the tower is what solved it |
+
+The mechanism it encodes: a free compass bias eats the common bearing shift a
+lateral move produces, and a free pitch bias eats the common elevation shift a
+radial move produces.  Only the near–far **difference** survives.  So the number
+that decides a viewpoint is the **range spread** of what you can identify — not
+sharpness, not pixel count, not DEM quality.  At Istanbul the spread was 50–53 km
+and the lateral leverage collapsed from 1.14 to 0.058 °/km, a factor of 20.
+Adding one near object at Denver moved it from 0.039 to 3.3 °/km, a factor of 85.
+
+`tools/scout_viewpoint.py` puts this in front of a shoot, with `--near` for
+towers and masts the DEM does not contain.
+
+### One extractor, and three silent failures it now cannot repeat
+
+Each of these destroyed a run while looking like an absence of signal:
+
+1. **Zero-padded smoothing.** `np.convolve(mode='same')` pads with zeros, so the
+   first smoothed samples of every column dive toward zero and mimic a skyline
+   edge at index 0 — which the "not at the very top" guard then rejects,
+   discarding the whole column.  Two of 840 columns survived.  `smooth_columns`
+   edge-replicates.
+2. **Over-aggressive masking.** Excluding every column carrying overlay furniture
+   left two disjoint 1.5° windows, and over 1.5° a distant ridge is a straight
+   line — so the azimuth fit had nothing to bite on and ran to its search
+   boundary.  Reject only what is opaque, found in the data.
+3. **Panel edges read as ridges.** Same sign, comparable contrast; only the shape
+   differs, because a panel returns the identical sub-pixel row for hundreds of
+   columns.  Left in, those runs are long, smooth and confident enough that least
+   squares weights them heavily.
+
+And the scene-dependence itself: red channel for hazed ridges (30 DN of contrast
+against 8 in blue), a sky-colour model where snow is *brighter* than the sky and
+haze *bluer* — a case that defeats any single-channel threshold in both
+directions at once.
+
+### Correlated residuals, and why more pixels stop helping
+
+`effective_samples` estimates the integrated autocorrelation of a residual
+series.  On the Istanbul frames, 839 samples at 0.14° would have given ~15 m of
+lateral position if the noise were white.  It gave nothing, because the residual
+is smooth in azimuth — extraction bias, haze-dependent edge placement, DEM error,
+a pitch bias drifting 0.05° between frames — and correlated error is exactly what
+a position shift looks like.  The effective count was of order the number of
+**frames**, not of pixels.  Any uncertainty quoted from a dense skyline match
+should be inflated by `sigma_inflation` before it is believed.
+
+### Two API decisions taken because of near-misses
+
+* `sensitivity(features, eye_m)` makes the observer height **positional and
+  required**.  Defaulting it to zero computes every elevation as if from sea
+  level, overstating the radial sensitivity twentyfold for a hilltop — and
+  returning a number that still looks plausible.
+* `circle_of_position` solves the locus **numerically and verifies every point**.
+  The textbook inscribed-angle circle is a planar theorem; across a 78 km chord
+  it disagrees with spherical bearings by ~0.3°, which at 3 °/km is a 100 m bias,
+  and the constructed arc runs through one of the landmarks where the bearing
+  degenerates.  Branch-picking by hand is the same class of sign reasoning that
+  has failed three separate times in this project, so it is no longer done by
+  hand.

@@ -1749,5 +1749,193 @@ class TestLunarMatch(unittest.TestCase):
         self.assertGreater(abs(corr[1, 5]), 0.9)     # cy  vs libration latitude
 
 
+class TestSkylineExtract(unittest.TestCase):
+    """The general terrain/sky boundary detector."""
+
+    def _scene(self, snow=False):
+        """Synthetic sky-over-ridge, optionally with a snowfield BRIGHTER than
+        the sky -- the case that defeats every single-channel threshold."""
+        import numpy as np
+        H, W = 300, 400
+        rgb = np.zeros((H, W, 3))
+        yy = np.arange(H)[:, None]
+        # sky: a blue vertical gradient, as real sky has
+        rgb[:, :, 0] = 160 + 0.10 * yy
+        rgb[:, :, 1] = 205 + 0.10 * yy
+        rgb[:, :, 2] = 230 + 0.08 * yy
+        crest = (150 + 25 * np.sin(np.linspace(0, 3.2, W))).astype(int)
+        for x in range(W):
+            c = crest[x]
+            if snow and 120 < x < 280:
+                rgb[c:, x, :] = 248.0            # brighter than the sky
+            else:
+                rgb[c:, x, 0] = 100.0            # hazed rock: darker, bluer
+                rgb[c:, x, 1] = 165.0
+                rgb[c:, x, 2] = 215.0
+        return rgb, crest
+
+    def test_edge_replication_is_not_optional(self):
+        """Zero-padded smoothing fabricates an edge at the top of every column.
+
+        `np.convolve(mode='same')` pads with zeros, so the first smoothed samples
+        of any column dive toward zero -- which is exactly the signature a
+        skyline detector looks for.  Guards that reject a detection "at the very
+        top" then throw the whole column away, and the failure presents as
+        terrain that cannot be detected at all.  Two of 840 columns survived when
+        this bug was live.
+        """
+        import numpy as np
+        from imu_fusion.skyline_extract import smooth_columns
+        band = np.full((60, 5), 200.0)
+        sm = smooth_columns(band, 9)
+        self.assertAlmostEqual(float(sm[0, 0]), 200.0, places=6)
+        self.assertAlmostEqual(float(sm[-1, 0]), 200.0, places=6)
+        self.assertLess(float(np.abs(sm - 200.0).max()), 1e-6)
+
+    def test_sky_model_catches_bright_and_dark_terrain(self):
+        """The sky-model detector must find the crest whether the terrain is
+        darker than the sky (haze) or brighter (snow).  A channel threshold can
+        only ever do one."""
+        import numpy as np
+        from imu_fusion.skyline_extract import sky_model_edge
+        for snow in (False, True):
+            rgb, crest = self._scene(snow=snow)
+            y = sky_model_edge(rgb, y_fit=(10, 100), y_search=(100, 290),
+                               thresh=13.0)
+            good = np.isfinite(y)
+            self.assertGreater(good.sum(), 0.95 * len(y),
+                               f"snow={snow}: only {good.sum()} columns found")
+            err = y[good] - crest[good]
+            # A threshold-crossing detector always lands a little INSIDE the
+            # edge: the smoothed departure has to build up before it trips.  A
+            # couple of pixels of constant offset is expected and harmless -- the
+            # elevation bias in any fit absorbs it.  What must stay small is the
+            # SCATTER, because that is the part no nuisance parameter can take
+            # out, and it is the same correlated-systematic floor that
+            # `resection_geometry.effective_samples` exists to account for.
+            self.assertLess(abs(float(np.median(err))), 4.0,
+                            f"snow={snow}: bias {np.median(err):+.1f} px")
+            self.assertLess(float(np.std(err - np.median(err))), 1.5,
+                            f"snow={snow}: scatter {np.std(err):.1f} px")
+
+    def test_straight_run_rejection_keeps_terrain(self):
+        """An overlay panel's edge and a ridge look identical to an edge
+        detector; only their SHAPE differs.  Rejecting dead-flat runs must
+        delete the panel and keep the terrain."""
+        import numpy as np
+        from imu_fusion.skyline_extract import drop_straight_runs
+        x = np.arange(600)
+        terrain = 150 + 12 * np.sin(x / 90.0)
+        y = terrain.copy()
+        y[200:420] = 143.0                        # a panel edge: perfectly flat
+        out = drop_straight_runs(y, tol=0.6, min_run=45)
+        self.assertTrue(np.all(np.isnan(out[210:410])), "panel edge survived")
+        self.assertGreater(np.isfinite(out[:180]).sum(), 170, "terrain deleted")
+        self.assertGreater(np.isfinite(out[440:]).sum(), 140, "terrain deleted")
+
+
+class TestResectionGeometry(unittest.TestCase):
+    """Predicting whether a view can fix a position, before searching for it."""
+
+    # the two real scenes this study measured, as (distance_km, height_m)
+    ISTANBUL = [(49.0, 871), (52.0, 937), (53.0, 1125), (71.8, 1122)]
+    DENVER = [(14.6, 1770), (92.5, 4346)]
+
+    def test_nuisance_biases_destroy_most_of_the_leverage(self):
+        """A compass bias eats the common bearing shift, a pitch bias the common
+        elevation shift.  Only the near-far DIFFERENCE survives, and quoting the
+        raw sensitivity is how a single-ridge view comes to look far better than
+        it is."""
+        from imu_fusion.resection_geometry import sensitivity
+        s = sensitivity(self.ISTANBUL, eye_m=177.0)
+        self.assertAlmostEqual(s["lateral_raw"], 1.169, delta=0.02)
+        self.assertAlmostEqual(s["lateral_absorbed"], 0.371, delta=0.02)
+        self.assertGreater(s["lateral_ratio"], 2.5)
+
+    def test_eye_height_is_required_not_defaulted(self):
+        """Defaulting the observer height to zero computes every elevation as if
+        from sea level, which overstates the radial sensitivity by ~20x for a
+        hilltop viewpoint -- and still returns a plausible-looking number."""
+        from imu_fusion.resection_geometry import sensitivity
+        with self.assertRaises(TypeError):
+            sensitivity(self.DENVER)          # positional eye_m is mandatory
+        near = sensitivity(self.DENVER, eye_m=1693.0)["radial_raw"]
+        sea = sensitivity(self.DENVER, eye_m=0.0)["radial_raw"]
+        self.assertGreater(sea / near, 10.0)
+
+    def test_reproduces_both_measured_outcomes(self):
+        """Geometry alone must reach the conclusions that cost hours of search:
+        Istanbul unusable, Denver a tight line of position."""
+        from imu_fusion.resection_geometry import verdict
+        ist = verdict(self.ISTANBUL, 0.142, 177.0)
+        self.assertFalse(ist["usable"])
+        self.assertGreater(ist["elongation"], 10.0)
+        self.assertGreater(ist["along_km"], 5.0)
+
+        den = verdict(self.DENVER, 0.0185, 1693.0)
+        self.assertLess(den["across_km"], 0.2)        # measured arc ~0.2 km wide
+        self.assertGreater(den["along_km"], 1.0)      # measured arc ~11 km long
+        self.assertTrue(den["line_of_position"])
+
+    def test_near_landmark_is_worth_an_order_of_magnitude(self):
+        """The one actionable recommendation: include something CLOSE."""
+        from imu_fusion.resection_geometry import sensitivity
+        far_only = sensitivity([(85.0, 4000), (92.5, 4346)], eye_m=1693.0)
+        with_near = sensitivity(self.DENVER, eye_m=1693.0)
+        self.assertGreater(with_near["lateral_absorbed"],
+                           10 * far_only["lateral_absorbed"])
+
+    def test_circle_of_position_reproduces_its_own_angle(self):
+        """Every returned point must actually see the requested angle.
+
+        The textbook inscribed-angle circle is a PLANAR construction and bearings
+        are spherical; across a 78 km chord the two disagree by ~0.3 deg, which
+        at 3 deg/km is a 100 m bias.  Solving the locus numerically and verifying
+        each point removes both that and the branch-picking that has caused three
+        separate sign errors in this project.
+        """
+        import numpy as np
+        from imu_fusion.resection_geometry import (circle_of_position,
+                                                   bearing_deg)
+        near = (39.74298, -104.99051)          # a downtown tower, ~15 km
+        far = (40.2549, -105.6151)             # Longs Peak, ~92 km
+        want = -1.2632
+        la, lo = circle_of_position(near, far, want, centre=(39.65, -104.88),
+                                    span_km=25, step_km=0.5)
+        self.assertGreater(len(la), 20)
+        got = np.array([((bearing_deg(a, b, *far) - bearing_deg(a, b, *near)
+                          + 180) % 360) - 180 for a, b in zip(la, lo)])
+        self.assertLess(float(np.abs(got - want).max()), 1e-3)
+
+    def test_circle_of_position_passes_through_the_measured_answer(self):
+        """The Denver photograph was solved independently at 39.644 N 104.878 W;
+        the locus built from the tower-to-summit angle must pass through it."""
+        import numpy as np
+        from imu_fusion.resection_geometry import circle_of_position
+        la, lo = circle_of_position((39.74298, -104.99051), (40.2549, -105.6151),
+                                    -1.2632, centre=(39.65, -104.88),
+                                    span_km=25, step_km=0.25)
+        d = np.hypot((la - 39.644) * 110.6, (lo + 104.878) * 85.4)
+        self.assertLess(float(d.min()), 0.35)
+
+    def test_correlated_residuals_do_not_average_down(self):
+        """839 samples of smooth, azimuth-correlated residual carry the
+        information of a handful, not of 839.  Treating them as independent is
+        what made a real uncertainty look 10x better than it was."""
+        import numpy as np
+        from imu_fusion.resection_geometry import effective_samples
+        rng = np.random.default_rng(7)
+        x = np.linspace(0, 10, 839)
+        white = rng.normal(0, 0.14, 839)
+        smooth = np.convolve(rng.normal(0, 1, 839 + 200),
+                             np.ones(200) / 200, mode="valid")[:839]
+        smooth *= 0.14 / smooth.std()
+        w = effective_samples(x, white)
+        s = effective_samples(x, smooth)
+        self.assertGreater(w["n_eff"], 400)
+        self.assertLess(s["n_eff"], 60)
+        self.assertGreater(s["sigma_inflation"], 3.0)
+
+
 if __name__ == "__main__":
     unittest.main()
