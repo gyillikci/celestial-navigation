@@ -102,7 +102,41 @@ def extract_skyline(path, y_top=330, y_bot=660, drop=13.0, smooth=9,
             if len(w) >= 8:
                 med[x] = np.median(w)
         y[np.isfinite(y) & np.isfinite(med) & (np.abs(y - med) > jump)] = np.nan
-    return y
+    return _drop_straight_lines(y)
+
+
+def _drop_straight_lines(y, tol=0.6, min_run=45):
+    ''' Discard detections lying on a perfectly horizontal line.
+
+        The app's translucent panels have sharp horizontal top edges, and to a
+        detector looking for "the row where it first gets darker" a panel edge is
+        indistinguishable from a ridge -- same sign, comparable size.  The give-
+        away is not contrast but SHAPE: a panel edge returns the identical
+        sub-pixel row for every one of the two or three hundred columns it spans,
+        and real terrain 50 km away never does that, because at 276 px/deg a
+        third of a pixel is a tenth of an arcminute of relief.
+
+        Left in, these segments are worse than missing data: they are long,
+        confident, and perfectly smooth, so a least-squares fit weights them
+        heavily and quietly drags the horizon toward the app's layout.
+    '''
+    out = y.copy()
+    good = np.isfinite(out)
+    if good.sum() < min_run:
+        return out
+    vals = out[good]
+    order = np.argsort(vals)
+    sv = vals[order]
+    idx = np.where(good)[0][order]
+    i = 0
+    while i < len(sv):
+        j = i
+        while j + 1 < len(sv) and sv[j + 1] - sv[i] <= tol:
+            j += 1
+        if j - i + 1 >= min_run:
+            out[idx[i:j + 1]] = np.nan
+        i = j + 1
+    return out
 
 
 def dem_profile(frame, dem, span=9.0, step=0.01, d_max_km=190.0):

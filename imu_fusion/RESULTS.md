@@ -503,3 +503,95 @@ work succeeded on a wide panorama with kilometres of relief, and this fails on a
 sharper picture of a flatter horizon. A narrow field is the wrong instrument no
 matter how good the DEM is. Zoom in to measure an angle; zoom out to fix a
 position.
+
+
+## Can a photographed skyline fix your position?  A controlled test with real GPS
+
+Three more Theodolite frames, from a fixed spot at 40.9046 N, 29.2094 E, 95 m,
+looking SE across the Gulf of İzmit at azimuths 131°, 135° and 139° (13:07 local,
+8× zoom).  Same self-documenting frames, so the GPS is ground truth and the
+question can be asked properly: **inject a known error into the position prior,
+search around the wrong prior, and measure how far the winner lands from the
+truth.**
+
+Site check again: SRTM 95.9 m against the app's 315 ft = 96.0 m.
+
+The horizon here is the Samanlı range — 670 to 1310 m at 45 to 73 km, spanning
++0.15° to +0.92°.  Better than the earlier sector (0.77° of relief instead of
+0.52°) and with genuine structure: one frame reaches a shape correlation of
+**+0.89** against the DEM.
+
+### The pitch bias is not a device constant — it depends on the platform
+
+Re-running the earlier measurement on both sets:
+
+| set | condition | pitch bias | frame-to-frame sd |
+|---|---|---|---|
+| 13:02 | moving car, ~82 km/h | **+1.505°** | 0.187° |
+| 13:07 | standing at a fence | **+0.866°** | 0.052° |
+
+The bias differs by 0.64° and the scatter is **3.6× smaller** at rest.  A 0.64°
+tilt of the apparent vertical is an acceleration of 0.11 m/s², which is a very
+gentle throttle change — so this is consistent with the accelerometer horizon
+being pulled by platform acceleration, the effect this whole study exists to
+bound.  Consistent, not proven: the two sets are at different sites and different
+bearings, so a bearing-dependent error would look the same.
+
+### The answer on this data: no
+
+| GPS error injected | search box | recovered error, mean of 8 directions | worst |
+|---|---|---|---|
+| 0 km | ±1 km | 0.5 km | 0.5 km |
+| 0.5 km | ±1 km | 0.5 km | 0.5 km |
+| 1 km | ±1.5 km | 0.5 km | 0.5 km |
+| 2 km | ±3 km | 2.1 km | 3.0 km |
+| 5 km | ±7.5 km | 6.6 km | 15.2 km |
+| 10 km | ±15 km | **16.0 km** | 23.7 km |
+
+At small prior errors the "recovery" is the search box doing the work, not the
+skyline.  From 2 km outward it is no better than the prior, and by 10 km it is
+worse than doing nothing.  Over a ±20 km box the global best sits **14.6 km from
+the truth with rms 0.097° against the truth's 0.142°** — a false minimum that
+genuinely scores better.
+
+![Skyline resection](results/fig_skyline_resection.png)
+
+### Why — and what it would take
+
+The two nuisance parameters absorb precisely the two first-order signals a
+position shift produces.  Moving *across* the line of sight swings every feature's
+bearing by nearly the same amount, which is indistinguishable from a compass
+bias; moving *along* it raises the whole horizon together, which is
+indistinguishable from a pitch bias.  Only the near-far **difference** survives:
+
+| motion | raw signal | after the bias absorbs the common part | precision at 0.14° |
+|---|---|---|---|
+| lateral (across sight line) | 1.17 °/km at 49 km | **0.371 °/km** | 0.4 km |
+| radial (along sight line) | 0.023 °/km at 49 km | **0.0073 °/km** | 19 km |
+
+So the geometry is a **line of position, not a fix** — an error ellipse roughly
+50× longer along the sight line than across it.  One bearing gives one LOP; this
+is the terrestrial twin of needing two bodies for a celestial fix.
+
+But even the 0.4 km lateral figure is not realised, and that is the instructive
+part.  With 839 samples and *white* 0.14° noise, lateral position would come out
+to ~15 m.  It comes out to nothing, because the 0.14° residual is **systematic** —
+smooth in azimuth, correlated across every sample in a frame (extraction bias,
+haze-dependent edge placement, DEM error, and a pitch bias that itself varies
+0.05° between frames).  Correlated error is exactly what a position shift looks
+like, so it does not average down; the effective sample count is the number of
+FRAMES, not the number of pixels.
+
+Confirming which constraint binds: repeating the whole search with the pitch bias
+**fixed** at its calibrated +0.866° — which should sharply constrain range — still
+puts the global minimum 16.6 km from the truth.  Calibration is not the
+bottleneck.  **Skyline-match accuracy is.**
+
+To make terrain resection work from a viewpoint like this, in order of leverage:
+
+1. **Two well-separated bearings**, not one sector — crossing two lines of
+   position is what turns an LOP into a fix.
+2. **Wide field, not long lens** — 1× over 90° beats 8× over 9°, as the previous
+   section also found.
+3. **Push the systematic floor below ~0.03°**, which is what the 1 km-class radial
+   sensitivity demands.  More pixels do not help until the errors are independent.
