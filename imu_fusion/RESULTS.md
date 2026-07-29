@@ -1193,3 +1193,96 @@ an observable that measures a *ratio* cannot break the degeneracy between the
 two things whose ratio it measures.  The near tower at Denver worked because it
 was 15 km against 92 — a 6× spread in range.  Tahoe's peaks are all the same
 distance away, so they all say the same thing.
+
+## A panning video: the scale comes free, the vertical does not
+
+An 18.6 s portrait clip (720×1280, 30 fps) panning 93° across a Bodrum bay at
+dusk — the same scene as the earlier still, and the first moving-camera input in
+this study.
+
+### What the video gave: its own focal length, to 0.4%
+
+The file is transcoded (`mp42`, no Apple keys, no creation time) so the focal
+length was gone again — the third nuisance parameter, in force for the third
+scene running.  But a **pan measures its own scale**.  Under pure rotation
+`x = f·tan θ`, so a rotation `dψ` moves a point by `dψ·(f + x²/f)`: the frame
+edges sweep faster than the centre by `1 + (x/f)²`.  Tracking the skyline in five
+windows across 482 frame pairs gives that curvature as **+1.13%** edge-vs-centre
+(bootstrap 98% positive), hence
+
+| | f | horizontal field | vs measured |
+|---|---|---|---|
+| **measured from the pan** | **3381 ± 910 px** | 12.16° | — |
+| 4× (100 mm equiv) | 3394 px | 12.11° | **0.4% off, 0.0σ** |
+| 8× (200 mm equiv) | 6789 px | 6.07° | 100.8% off, **3.7σ** |
+
+Confirmed independently: the camera was on 4×.  **So Tahoe's unknown scale was
+never fundamental — it was an artifact of using a single frame.**
+
+*This is not a new method.*  It is a special case of Hartley's self-calibration
+from a rotating camera (ECCV 1994), and the fact that **single-axis rotation is a
+recognised critical motion** — focal length recoverable, full calibration not —
+was in the literature before I re-derived it.  See `related_work.md`.
+
+### Stitching: a random walk, and how the redundancy kills it
+
+559 frames → one azimuth/elevation curve over 104°.  Chaining 558 pairwise
+alignments is a random walk: at ~0.5 px per step, √558 × 0.5 ≈ 12′, and the
+chained stitch duly sat at **16.3′**.  The pan never revisits an azimuth, so there
+is no loop closure.  But a 12° field sweeping 93° means **every azimuth is seen by
+~70 frames**, so solving each frame's yaw and pitch against the global curve
+turns the walk into an average:
+
+| iteration | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| repeatability | 16.33′ | 8.31′ | 3.76′ | 2.45′ | 1.52′ | **1.15′** |
+
+### And the position solve failed — twice
+
+| objective | best rms | separation |
+|---|---|---|
+| full stitched curve | 37.80′ | **1.06×** |
+| high-passed at the field of view | 21.52′ | **1.00×** |
+
+A 33× gap between how well the observation *repeats* (1.15′) and how well
+anything *fits* it (37.8′) means the observation is corrupted, not noisy.
+
+**The cause: a pan cannot recover elevation structure longer than its own field
+of view.**  A slow camera pitch drift and a slow terrain trend are the same
+function of azimuth, and with a 12° window the bundle adjustment absorbs
+everything longer into per-frame pitch.  Measured: the fitted pitch retains
+**1.08° of std after smoothing over 6° of yaw**, and of the stitched curve's 66′
+total variance only **28′** lies at wavelengths shorter than one frame.  Over
+half the signal is in a band the pan cannot vouch for — and that is the band a
+104° resection depends on.
+
+The bundle adjustment that fixed the random walk achieved **self-consistency,
+which is not correctness**: it made the frames agree by inventing a pitch
+history.  Repeatability improved 14× while the answer stayed wrong, which is
+worth remembering as a diagnostic — *repeatability is not accuracy*, and only the
+separation metric caught it.
+
+This is the free-focal-length lesson one axis over.  A pan self-calibrates
+**scale**, because `sec²` curvature is a within-frame signature.  It cannot
+self-calibrate **tilt**, because tilt has no within-frame signature at all.
+
+### What the literature says to do instead
+
+Reading rather than deriving (`related_work.md` has the sources and the caveat
+that full texts were unreachable):
+
+1. **Attitude from the horizon first, then position** (Grelsson & Felsberg; Dumble
+   & Gibbens).  The sea horizon is plainly visible in this clip and was never
+   used.  The pan cannot supply its own vertical; the horizon can.
+2. **Match local curvelets, not a globally aligned curve** (Baatz, Saurer et al.,
+   ECCV 2012).  A bag of *local* skyline descriptors is invariant to exactly the
+   slow drift that destroyed this solve; my two-global-offset alignment is the
+   estimator most vulnerable to it.
+3. **Sample roll and tilt** rather than fitting them free — the published
+   pipelines sweep roll over ±6° instead of letting an offset absorb it.
+4. **Extract the skyline with continuity** (shortest-path / DP across columns),
+   which is what the classical baselines do; the per-column decisions in
+   `skyline_extract` mislocked onto rooflines and the waterline here.
+5. **Judge against the field's 1 km criterion** — Baatz et al. report 88% of 200+
+   images within 1 km.  By that standard the Tahoe result is *at* the state of the
+   art, not a disappointment, and Bodrum is simply not solved.

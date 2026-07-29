@@ -204,3 +204,108 @@ The two stages need different sourcing:
   project claims.
 - **GPL code**, on the assumption the iOS app may ship closed. If it ships
   open-source that constraint relaxes and `r.viewshed`/OpenVINS become options.
+
+---
+
+## Video pans and the vertical: what I should have read first
+
+Added after attempting a resection from a panning iPhone video (Bodrum, 559
+frames, 93° of yaw).  Two of the three things I derived from scratch are
+textbook, and the third is a *known* degeneracy I walked straight into.  Recorded
+here so the next attempt starts from the literature.
+
+**Caveat on sourcing.** Every full text below returned HTTP 403 through this
+session's egress proxy, so these are summaries from search results, not from
+reading the primary papers.  Verify before relying on a number.
+
+### 1. Focal length from a pan is Hartley 1994, not a new idea
+
+- Hartley, *Self-Calibration from Multiple Views with a Rotating Camera*, ECCV
+  1994. <https://users.cecs.anu.edu.au/~hartley/Papers/calibration/eccv94/calib.pdf>
+  Calibration from point matches alone across ≥3 images taken from one point with
+  different orientations; no knowledge of the orientations required.
+
+What I did — measuring the `1 + (x/f)²` variation in across-frame image motion —
+is a special case of this, and it worked (f to 0.4% of the 4× nominal).  The part
+I should have known in advance: **rotation about a single axis is a recognised
+"critical motion"**, degenerate for full calibration, though the focal length
+specifically can still be recovered.  Kahl et al. and Zisserman et al. refine
+when single-axis rotation is and is not critical.
+
+That is precisely the outcome I measured empirically and then explained as if it
+were a discovery: the pan gave me the scale and took away the vertical.
+
+### 2. The skyline literature does NOT globally align a curve
+
+- Baatz, Saurer et al., *Large Scale Visual Geo-Localization of Images in
+  Mountainous Terrain*, ECCV 2012.
+  <https://link.springer.com/chapter/10.1007/978-3-642-33709-3_37>
+- Saurer, Baatz et al., *Image Based Geo-localization in the Alps*, IJCV.
+
+Method: a **bag of curvelets** — *local* skyline shape descriptors aggregated
+across the whole skyline and matched against a large database of panoramic
+skylines rendered offline from DEMs, with each descriptor's viewing direction
+stored for on-the-fly geometric verification in an inverted-file search.  No
+prior camera position or field of view needed.  Reported **88% of 200+ images
+localised within 1 km**.
+
+Two corrections to how this project has been working:
+
+- **Local descriptors, not a global fit.**  My solver aligns one long curve with
+  two global nuisance offsets.  That is exactly the estimator that collapses when
+  the panorama carries slow drift — which is what happened at Bodrum.  A bag of
+  local curvelets is invariant to drift that a global alignment cannot survive.
+- **1 km is the field's success criterion**, not 100 m.  The Tahoe result
+  (≈1 km) is therefore *at* the state of the art rather than disappointing, and I
+  should stop treating a kilometre as a failure.
+
+### 3. Roll, tilt and FOV are SAMPLED in the literature, not solved
+
+The profile-matching work sweeps camera roll explicitly (e.g. −6° to +6°) and
+samples tilt and field of view, reporting that roll has a significant effect on
+match quality and that sampling it recovers images the baseline cannot localise.
+
+This project fits those as free offsets instead, which is what let them absorb
+the signal — the same nuisance-absorption failure documented throughout
+`RESULTS.md`, arrived at independently three times.
+
+### 4. The vertical comes from the horizon — this is a solved sub-problem
+
+- Grelsson & Felsberg, *Highly Accurate Attitude Estimation via Horizon
+  Detection*.  Canny plus probabilistic Hough voting for an approximate attitude
+  and horizon line, then refinement by **registering the extracted edge pixels
+  against the geometrical horizon from SRTM3 at an approximate position**.
+- Grelsson et al., *GPS-level accurate camera localization with HorizonNet*,
+  Journal of Field Robotics, 2020.
+  <https://onlinelibrary.wiley.com/doi/abs/10.1002/rob.21929>
+- Dumble & Gibbens, *Horizon Profile Detection for Attitude Determination* —
+  extracts the actual horizon *profile shape* for visual attitude determination.
+- Carrio et al., *Attitude estimation using horizon detection in thermal images*,
+  IJARS 2018.
+
+This is the direct answer to the Bodrum failure.  The pan cannot supply its own
+vertical; the *horizon* supplies it, and the sea horizon is plainly visible in
+that very clip.  The published order is **attitude from the horizon first, then
+position** — not position and attitude jointly from a drifting panorama.
+
+### 5. Skyline extraction: continuity, not per-column independence
+
+- *Comparison of Semantic Segmentation Approaches for Horizon/Sky Line
+  Detection*, arXiv:1805.08105. <https://arxiv.org/abs/1805.08105>
+- Survey: horizon detection for maritime video surveillance.
+  <https://ouci.dntb.gov.ua/en/works/7WGXR6O7/>
+
+The classical baselines enforce **continuity along the skyline** (shortest-path /
+dynamic programming across columns) rather than deciding each column
+independently.  `skyline_extract` decides per column and then repairs with
+`drop_straight_runs` / `drop_outliers`; the mislocks onto rooflines and the
+waterline in the Bodrum frames are the predictable failure of that design, and a
+DP formulation would be the principled fix.
+
+### What to do differently next time
+
+1. Take attitude from the horizon **before** attempting position (Grelsson).
+2. Match **local curvelets**, not a globally aligned curve (Baatz).
+3. **Sample** roll/tilt rather than fitting them as free offsets.
+4. Extract the skyline with a **continuity-constrained** method, not per column.
+5. Judge success against the field's **1 km** benchmark.
