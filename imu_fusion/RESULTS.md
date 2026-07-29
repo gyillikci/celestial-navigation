@@ -595,3 +595,63 @@ To make terrain resection work from a viewpoint like this, in order of leverage:
    section also found.
 3. **Push the systematic floor below ~0.03°**, which is what the 1 km-class radial
    sensitivity demands.  More pixels do not help until the errors are independent.
+
+
+## Denver: a blind solve, and the near/far pair that makes it work
+
+A stock photograph of the Denver skyline with the Front Range behind it — no GPS,
+no bearing, no focal length, no EXIF beyond the copyright block.  Everything is
+solved from the pixels and SRTM.  (The image is © Getty Images/iStockphoto and is
+not redistributed here; only the extracted curves are.)
+
+**The extraction is the easy part for once.**  The Turkish frames needed the red
+channel because hazed ridges are ~30 DN darker than the sky there.  Here that
+fails in both directions at once: the snowfields are *brighter* than the sky
+(R 250 vs 175) and the hazed foothills are *bluer* (B−R 123 vs 68).  Modelling
+the sky per column as a linear colour ramp and flagging departure in ANY
+direction gets **1024 of 1024 columns**.
+
+**The result.**
+
+| | |
+|---|---|
+| position | **39.644 N, 104.878 W** (best point on the line of position) |
+| azimuth of frame centre | 316.8° |
+| field of view | 5.4° — about a 400 mm lens |
+| skyline residual | **1.11 arcmin rms over 5.4° of horizon** |
+| identification | the DEM puts the summit at image column 549 within **0.8 km of Longs Peak**, 92 km away — confirming the photo's own caption, which was read only afterwards |
+
+1.11 arcmin is **7.6× better** than the 8.4 arcmin floor of the Turkish frames.
+The Front Range gives sharp, individual summits instead of a smooth ridge, and
+the residual has no visible azimuth-correlated structure left.
+
+### The skyline alone still does not fix the position
+
+Searching the whole metro area on the skyline alone puts the best cell at
+39.670 N, 104.850 W — and that answer is **wrong**, decisively: from there the
+DEM predicts downtown Denver 11.1° to the *left* of Longs Peak, while the
+photograph shows it 1.25° to the *right*.  The same degeneracy as Istanbul; a
+better residual did not cure it.
+
+### What does fix it is a near object
+
+The photograph contains one: **downtown Denver itself**, 15 km away, against
+Longs Peak at 92 km.  The angle between Republic Plaza and the Longs summit is
+1.39°, measured straight off the image, and it is enormously sensitive — roughly
+**8° per kilometre** of lateral movement, because the near object is 6× closer
+than the far one.  That single angle is a classic horizontal-angle **circle of
+position**, the same construction as `landfall.two_landmark_circle_fix`.
+
+It collapses the metro-wide ambiguity to an **11 km arc** running from
+39.61 N 104.84 W to 39.69 N 104.93 W, about 0.2 km wide.  Along that arc the
+skyline residual varies only from 1.11 to 1.19 arcmin — flat — so the arc is
+where the answer stops.
+
+**One angle, one line of position.**  A second identified near landmark at a
+different bearing would cross it and give a true fix, and the machinery for that
+already exists in `landfall.py`.  This is the same conclusion the Istanbul frames
+reached from the other direction: there, the absence of a near/far pair was the
+diagnosis; here, its presence is the cure, and the arc it leaves behind is
+exactly the residual freedom the geometry predicts.
+
+![Denver resection](results/fig_denver_resection.png)
