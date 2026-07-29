@@ -347,6 +347,49 @@ Together: **2026-07-28 20:30–21:00 UTC**, i.e. 23:30–00:00 local. Colongitud
 2 px wide — which is why the limb detector returned nothing over a 73.5° arc
 centred on image angle 289° and returned a clean circle everywhere else.
 
+### Did it actually improve the match?
+
+Four things changed at once — real texture, libration, the topocentric
+correction, the terminator — so "the match improved" is not a finding until it
+says which change bought what. `tools/moon_ablation.py` measures them one at a
+time on IMG_7790, two ways.
+
+**Pattern match** — whole-disk NCC, with the in-plane rotation re-optimised for
+every condition, so orientation is never the excuse for a bad score:
+
+| condition | NCC |
+|---|---|
+| schematic maria, no libration — *the code as it stood* | 0.368 |
+| schematic maria **+ libration** | 0.362 |
+| Stellarium crater texture | 0.786 |
+| + geocentric libration | 0.913 |
+| + topocentric libration | 0.928 |
+| + terminator from the sub-solar point | **0.950** |
+
+Note the second row. Applying the correct libration to the ten-blob cartoon made
+it very slightly **worse**. The libration is a ~5° rotation of the surface, and a
+render whose finest detail is a 0.2-radius fuzzy ellipse cannot resolve 5°. The
+libration only starts paying once the texture is real enough to carry it — which
+is an argument for doing both or neither, not for doing the cheap half.
+
+**Geometric match** — tie-point residual, with disk centre, radius and rotation
+*always free*, so the fit gets every chance to absorb a wrong libration before it
+is charged for one. This is the honest test, because libration is 0.96 correlated
+with the disk centre and re-centring hides most of the error:
+
+| libration model | rms |
+|---|---|
+| forced to (0, 0) — the old default | **3.985 px** |
+| geocentric | 0.731 px |
+| **topocentric, for Istanbul** | **0.197 px** |
+| solved from the pixels | 0.173 px |
+
+**20× better** overall, and the step that the request was actually about —
+computing the sub-Earth point *for Istanbul* rather than for the Earth's centre —
+is a further **3.7×** on its own. Even after the fit re-centres the disk to
+compensate, ignoring libration still displaces features by a median 5.4 px and up
+to 9.2 px, on a disk where one degree of selenographic arc is 5.6 px.
+
 ### Two things that went wrong, and what they teach
 
 **1. A sign error that hid behind small residuals.** `tie_points` slides the
