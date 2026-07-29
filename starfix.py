@@ -1889,6 +1889,159 @@ def get_terrestrial_position (point_a1 : LatLonGeodetic, # First point pair
 #pylint: enable=R0913
 #pylint: enable=R0917
 
+class TerrestrialFixCollection:
+    ''' A landfall/terrestrial fix from three or more identified landmarks (lighthouses,
+        headlands, peaks) and the angle observed between each pair of adjacent
+        landmarks (left to right). Generalizes get_terrestrial_position() (limited to
+        exactly three landmarks, with the caller manually picking the true
+        intersection): false intersections are eliminated automatically, and
+        redundant landmarks (more than three) are combined for accuracy. '''
+
+    def __init__ (self, point_list : list[LatLonGeodetic], angle_list : list[int | float]):
+        ''' point_list: landmarks, left to right, >= 3 required.
+            angle_list: angle (degrees) between each consecutive pair of landmarks;
+            len(angle_list) must be len(point_list) - 1. '''
+        if len (point_list) < 3:
+            raise IntersectError ("TerrestrialFixCollection needs at least three landmarks")
+        if len (angle_list) != len (point_list) - 1:
+            raise ValueError \
+                ("Number of angles must be exactly one less than the number of landmarks")
+        for a in angle_list:
+            if a <= 0 or a >= 180:
+                raise ValueError ("Angles must be in the interval (0, 180) degrees")
+        self.point_list = point_list
+        self.angle_list = angle_list
+
+    def get_circles (self) -> list[Circle]:
+        ''' Return the circles of position defined by each pair of adjacent landmarks.
+            A fixed pair + angle defines two mirror-image circles, so point order
+            matters: landmarks are left to right, and the circle that actually passes
+            through the observer is obtained by passing the right-hand landmark first. '''
+        return [get_circle_for_angle (self.point_list[i+1], self.point_list[i],\
+                                      self.angle_list[i])\
+                for i in range (len (self.angle_list))]
+
+#pylint: disable=R0912
+#pylint: disable=R0914
+    def get_position (self, estimated_position : LatLonGeodetic | NoneType = None,
+                      landmark_exclusion_radius_km : int | float = 0.5,
+                      cluster_limit_km : int | float = 5) \
+                -> tuple [LatLonGeocentric, float]:
+        ''' Determine the observer's position from the collection of landmark angle
+            observations. Returns the fixed position and a fitness/agreement value
+            (0 for an exact fit; larger values indicate disagreement between redundant
+            observations, e.g. due to measurement errors).
+
+            Note: like get_terrestrial_position(), the position is not converted to
+            geodetic (WGS-84); wrap it with LatLonGeodetic(ll=...) if needed -- this
+            avoids applying an ellipsoid correction only on the way out while the
+            supplied landmarks are used as-is (uncorrected) throughout the geometry.
+            With four or more landmarks, some circle pairs share no landmark, so their
+            spurious second intersection generally isn't at any landmark and survives
+            the filtering below; it is instead weeded out by clustering, since every
+            circle passes through the true position (forming a tight cluster there)
+            while each spurious intersection is a one-off outlier. cluster_limit_km
+            should sit well below the typical distance to landmarks, but comfortably
+            above the expected measurement/reading-error scatter. '''
+        circles = self.get_circles ()
+        candidates = list [tuple[LatLonGeocentric, float]] ()
+        for i, circle_i in enumerate (circles):
+            for circle_j in circles [i+1:]:
+                try:
+                    ints, fitness, _ = get_intersections (circle_i, circle_j,\
+                                                          diagnostics=False)
+                except IntersectError:
+                    continue
+                if isinstance (ints, tuple):
+                    for p in ints:
+                        candidates.append ((p, fitness))
+                else:
+                    candidates.append ((ints, fitness))
+        if len (candidates) == 0:
+            raise IntersectError ("No intersections found for terrestrial fix", self)
+
+        # Eliminate intersections coinciding with a landmark: every circle passes
+        # exactly through the two landmarks that defined it, so such a point is a
+        # geometrically guaranteed false solution, not a valid fix.
+        filtered = list [tuple[LatLonGeocentric, float]] ()
+        for p, fitness in candidates:
+            near_landmark = False
+            for lm in self.point_list:
+                if spherical_distance (p, lm) < landmark_exclusion_radius_km:
+                    near_landmark = True
+                    break
+            if not near_landmark:
+                filtered.append ((p, fitness))
+        if len (filtered) == 0:
+            raise IntersectError \
+                ("All intersections coincide with landmarks. Check angle measurements.", self)
+
+        # Cluster the surviving candidates: prefer the cluster closest to the
+        # estimated position if given, otherwise the largest (best-agreeing) one.
+        if estimated_position is not None:
+            filtered.sort (key = lambda pf: spherical_distance (pf[0], estimated_position))
+            best_cluster = [filtered [0]]
+            for p, fitness in filtered [1:]:
+                if spherical_distance (p, best_cluster[0][0]) < cluster_limit_km:
+                    best_cluster.append ((p, fitness))
+        else:
+            best_cluster = []
+            for p, fitness in filtered:
+                cluster = [(p, fitness)]
+                for p2, fitness2 in filtered:
+                    if p2 is not p and spherical_distance (p, p2) < cluster_limit_km:
+                        cluster.append ((p2, fitness2))
+                if len (cluster) > len (best_cluster):
+                    best_cluster = cluster
+
+        # Fitness-weighted vector mean of the chosen cluster (mirrors SightCollection).
+        fitness_sum = sum (f for _, f in best_cluster)
+        summation_vec = [0.0, 0.0, 0.0]
+        for p, fitness in best_cluster:
+            weight = fitness / fitness_sum if fitness_sum > 0 else 1 / len (best_cluster)
+            summation_vec = add_vecs \
+                (summation_vec, mult_scalar_vect (weight, to_rectangular (p)))
+        summation_vec = normalize_vect (summation_vec)
+        result = to_latlon (summation_vec)
+        mean_fitness = fitness_sum / len (best_cluster)
+        return result, mean_fitness
+#pylint: enable=R0912
+#pylint: enable=R0914
+
+################################################
+# Silhouette-based landfall reading
+################################################
+
+def get_pixel_bearing_offset (pixel_x : int | float, image_width_px : int | float,
+                              horizontal_fov_deg : int | float) -> float:
+    ''' Convert a horizontal pixel position in a photograph into an angular offset
+        (degrees, positive = right of center) from the image's optical axis, using a
+        rectilinear (pinhole) camera model -- the building block for reading a
+        landfall angle fix out of a photographed skyline instead of a sextant. '''
+    if not 0 < horizontal_fov_deg < 180:
+        raise ValueError ("horizontal_fov_deg must be in the interval (0, 180) degrees")
+    focal_length_px = (image_width_px / 2) / tan (deg_to_rad (horizontal_fov_deg / 2))
+    offset_px = pixel_x - (image_width_px / 2)
+    return rad_to_deg (atan2 (offset_px, focal_length_px))
+
+def get_angles_from_silhouette (pixel_positions : list[int | float],
+                                image_width_px : int | float,
+                                horizontal_fov_deg : int | float) -> list [float]:
+    ''' Given the horizontal pixel positions of identified landmarks in a photographed
+        skyline/silhouette (left to right), the image width and horizontal field of
+        view, compute the angle (degrees) between each consecutive pair of landmarks.
+        Only relative angles are used (as with a sextant held horizontally), so no
+        camera compass heading is required. Feed the result into
+        TerrestrialFixCollection, together with the landmarks' known positions, for a
+        landfall fix from a single photograph -- the silhouette equivalent of the
+        rendered-silhouette matching used for cross-view geo-localization in natural
+        environments (see the CrossLocate project), computed geometrically from a
+        handful of identified peaks instead of via image retrieval. '''
+    if len (pixel_positions) < 2:
+        raise ValueError ("At least two landmarks are needed to read an angle")
+    bearings = [get_pixel_bearing_offset (x, image_width_px, horizontal_fov_deg)\
+                for x in pixel_positions]
+    return [bearings[i+1] - bearings[i] for i in range (len (bearings) - 1)]
 
 
 ################################################

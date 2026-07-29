@@ -1,6 +1,7 @@
 ''' Test suite for the toolkit '''
 # pylint: disable=C0413
 import unittest
+from math import tan, radians
 
 import sys
 from pathlib import Path
@@ -19,8 +20,11 @@ from starfixdata_sea_3       import main as main_sea_3
 from starfixdata_sea_4       import main as main_sea_4
 from starfixdata_sea_5       import main as main_sea_5
 from terrestrial             import main as main_terrestrial
+from landfall_silhouette     import main as main_landfall_silhouette
 from starfix                 import LatLonGeocentric, LatLonGeodetic, spherical_distance,\
-                                    to_rectangular, to_latlon
+                                    to_rectangular, to_latlon, angle_between_points,\
+                                    get_pixel_bearing_offset, get_angles_from_silhouette,\
+                                    TerrestrialFixCollection, IntersectError
 #pylint: enable=E0401
 
 
@@ -67,6 +71,79 @@ class TestStringMethods(unittest.TestCase):
     def test_terrestrial (self):
         ''' Test suite for Terrestrial '''
         main_terrestrial ()
+
+    def test_landfall_silhouette (self):
+        ''' Test suite for silhouette-based landfall reading '''
+        main_landfall_silhouette ()
+
+    def test_pixel_bearing_offset (self):
+        ''' Verify the pinhole camera model used to read bearings out of a photograph '''
+        width = 4000
+        fov = 60
+        # The center pixel must have zero offset, regardless of field of view.
+        assert abs (get_pixel_bearing_offset (width/2, width, fov)) < 1e-9
+        # The right edge of the image must be at exactly +fov/2, the left edge at -fov/2.
+        assert abs (get_pixel_bearing_offset (width, width, fov) - fov/2) < 1e-9
+        assert abs (get_pixel_bearing_offset (0, width, fov) - (-fov/2)) < 1e-9
+        try:
+            get_pixel_bearing_offset (width/2, width, 180)
+            assert False, "Expected ValueError for an out-of-range field of view"
+        except ValueError:
+            pass
+
+    def test_angles_from_silhouette (self):
+        ''' Verify that reading landmark angles from simulated pixel positions
+            reproduces the angles used to place them there (forward/inverse
+            round-trip of the pinhole camera model). '''
+        width = 3000
+        fov = 45
+        true_angle_1 = 12.3
+        true_angle_2 = 8.7
+        offsets = [-true_angle_1, 0, true_angle_2]
+        focal_length_px = (width/2) / tan (radians (fov/2))
+        pixels = [width/2 + focal_length_px * tan (radians (o)) for o in offsets]
+        angles = get_angles_from_silhouette (pixels, width, fov)
+        assert abs (angles [0] - true_angle_1) < 1e-6
+        assert abs (angles [1] - true_angle_2) < 1e-6
+
+    def test_terrestrial_fix_collection (self):
+        ''' Verify TerrestrialFixCollection recovers a known observer position from
+            the angles it would have observed between three, and then four,
+            landmarks -- exercising both the minimal case (relying on landmark
+            exclusion alone) and the redundant case (relying on clustering to
+            reject the spurious intersection between non-adjacent circles). '''
+        p1 = LatLonGeodetic (58.7396,   17.8656)
+        p2 = LatLonGeodetic (58.594091, 17.467489)
+        p3 = LatLonGeodetic (58.60355,  17.316041)
+        p4 = LatLonGeodetic (58.55,     17.05)
+        true_position = LatLonGeodetic (58.4367, 17.5638)
+
+        angle_12 = angle_between_points (true_position, p1, p2)
+        angle_23 = angle_between_points (true_position, p2, p3)
+        angle_34 = angle_between_points (true_position, p3, p4)
+
+        fix_3 = TerrestrialFixCollection ([p1, p2, p3], [angle_12, angle_23])
+        pos_3, _ = fix_3.get_position (estimated_position=true_position)
+        assert spherical_distance (pos_3, true_position) < 0.01 # 10 meters
+
+        fix_4 = TerrestrialFixCollection \
+            ([p1, p2, p3, p4], [angle_12, angle_23, angle_34])
+        pos_4, _ = fix_4.get_position (estimated_position=true_position)
+        assert spherical_distance (pos_4, true_position) < 0.01 # 10 meters
+
+        # Fewer than three landmarks must be rejected.
+        try:
+            TerrestrialFixCollection ([p1, p2], [angle_12])
+            assert False, "Expected IntersectError for less than 3 landmarks"
+        except IntersectError:
+            pass
+
+        # A mismatched number of angles must be rejected.
+        try:
+            TerrestrialFixCollection ([p1, p2, p3], [angle_12])
+            assert False, "Expected ValueError for a mismatched angle count"
+        except ValueError:
+            pass
 
     def test_mc (self):
         ''' Test suite for Monte Carlo simulation '''

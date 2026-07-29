@@ -49,6 +49,7 @@ A simple calculator for this can be
     1. [Running the chicago script](#run-chicago-script)
     1. [Azimuth calculation](#azimuth)
     1. [Terrestrial Navigation](#terrestrial)
+    1. [Landfall via Silhouette Reading](#landfall-silhouette)
 1. [Dead Reckoning (Moving observer)](#dead-reckoning)
     1. [From <tt>Sight</tt> to <tt>Sight</tt>](#run-sea-script)
     1. [From <tt>LatLon</tt> to <tt>Sight</tt>](#run-sea-script-2)
@@ -707,6 +708,38 @@ calculated correct position (intersection).
 
 You may also use the supplied Jupyter Notebook script
 [notebook_terrestrial.ipynb](notebook_terrestrial.ipynb).
+
+### 3.vi Landfall via Silhouette Reading <a name="landfall-silhouette"></a>
+
+The classic technique above is limited to exactly three landmarks (two circles),
+and requires manually picking the true intersection out of a false one located
+at one of the landmarks, and requires a sextant held horizontally.
+
+Two additions in [starfix.py](starfix.py) build on this:
+
+* `TerrestrialFixCollection` generalizes `get_terrestrial_position()` to three
+  **or more** landmarks. The false intersections are eliminated automatically
+  (rather than by hand), and any extra, redundant landmarks are combined into a
+  single, more accurate fix.
+* `get_angles_from_silhouette()` "reads" the angles between identified landmarks
+  directly out of a photograph of the skyline (their pixel positions, the image
+  width and the camera's horizontal field of view), instead of requiring a
+  sextant reading. Only the relative angles between landmarks are used, so no
+  compass heading is needed.
+
+This is a lightweight, purely geometric take on the idea explored by the
+[CrossLocate](https://cphoto.fit.vutbr.cz/crosslocate/) project (matching a
+photographed natural skyline against a database of rendered terrain
+silhouettes to geo-localize the photographer): instead of a trained
+image-retrieval model and a large database of rendered views, a handful of
+manually (or automatically) identified charted landmarks are used to resect
+the position directly.
+
+[This sample](landfall_silhouette.py) simulates a photograph of the same three
+lighthouses used above (plus a fourth, synthetic landmark to demonstrate the
+redundant case), reads the landmark angles out of it, and recovers the
+observer's position -- showing that the extra landmark improves the accuracy
+of the fix under simulated reading error.
 
 ## 4. Dead Reckoning (Moving observer)<a name="dead-reckoning"></a>
 
