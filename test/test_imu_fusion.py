@@ -1908,6 +1908,44 @@ class TestResectionGeometry(unittest.TestCase):
         self.assertAlmostEqual(unknown["across_km"], known["across_km"], places=6)
         self.assertGreater(focal_absorbed_radial(tahoe, 1899.0), 0.0)
 
+    def test_focal_bounds_bracket_the_measured_tahoe_scale(self):
+        """The bracket must contain the answer and still exclude the failure.
+
+        The Tahoe search with the scale free railed at 510 px/deg and returned no
+        minimum; bounded, the same search converged at 143.  So the bracket has
+        to be tight enough to keep 510 out -- a bound that admits the runaway
+        buys nothing -- while still comfortably containing 143.
+        """
+        from imu_fusion.resection_geometry import focal_bounds_from_relief
+        # 129.4 px of crest once the near rock point is masked, against the
+        # angular reliefs the DEM actually renders over that 42 deg arc at
+        # shoreline candidates -- 1.0 deg where the far range is across open
+        # water, up to 6 deg where the camera stands under close terrain.
+        lo, hi = focal_bounds_from_relief(129.4, [1.00, 1.02, 2.58, 5.99])
+        self.assertLess(lo, 143.0)
+        self.assertGreater(hi, 143.0)
+        self.assertLess(hi, 510.0)
+        # The upper bound is the one that does the work, and it must come from
+        # the SMALLEST relief; taking the largest would put it at ~17 and exclude
+        # the answer outright.
+        self.assertAlmostEqual(hi, 129.4 / (1.00 * 0.75), places=6)
+
+    def test_focal_bounds_invert_relief_to_scale(self):
+        """More degrees for the same pixels is a SHORTER focal length.
+
+        An off-by-inversion here would bracket the reciprocal of the answer and
+        the search would rail against a bound while looking perfectly principled.
+        """
+        from imu_fusion.resection_geometry import focal_bounds_from_relief
+        lo, hi = focal_bounds_from_relief(100.0, [1.0, 2.0], margin=0.0)
+        self.assertAlmostEqual(lo, 50.0, places=9)     # 100 px / 2 deg
+        self.assertAlmostEqual(hi, 100.0, places=9)    # 100 px / 1 deg
+        wide = focal_bounds_from_relief(100.0, [1.0, 2.0], margin=0.25)
+        self.assertLess(wide[0], lo)
+        self.assertGreater(wide[1], hi)
+        with self.assertRaises(ValueError):
+            focal_bounds_from_relief(0.0, [1.0])
+
     def test_circle_of_position_reproduces_its_own_angle(self):
         """Every returned point must actually see the requested angle.
 

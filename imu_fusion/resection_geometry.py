@@ -161,6 +161,56 @@ def focal_absorbed_radial(features, eye_m, k=K_REFRACTION):
     return float(np.std(r - lam * e))
 
 
+def focal_bounds_from_relief(relief_px, terrain_reliefs_deg, margin=0.25):
+    ''' Bracket the unknown pixels-per-degree from the skyline's own relief.
+
+        `focal_absorbed_radial` says an unknown scale destroys radial position.
+        It does not say the scale is unknowable.  A search that lets the focal
+        length run free will rail it against whichever bound flatters the wrong
+        answer -- on the Tahoe wallpaper, f free over 60-520 px/deg pinned at 510
+        and returned scattered positions at 2.2-2.7 arcmin, no minimum at all.
+        Bounding it PHYSICALLY, on the other hand, cost nothing and let the same
+        search converge to 400 m.
+
+        The bound is free because the extraction already measured it.  The
+        vertical span of the extracted crest, in pixels, divided by the angular
+        span the terrain can plausibly subtend, in degrees, IS the scale.  The
+        angular span comes from the DEM: render the horizon at a handful of
+        candidate positions and take the spread of (max elevation - min).
+
+        `relief_px`         peak-to-trough span of the extracted skyline, pixels
+        `terrain_reliefs_deg`  angular reliefs rendered across candidates, deg
+        `margin`            fractional widening, to cover positions not sampled
+
+        Returns (f_lo, f_hi) in pixels per degree.  This is a BRACKET, not an
+        estimate: it is only as good as the assumption that the extracted crest
+        and the rendered arc cover the same features, so mask foreground before
+        measuring the relief -- a near rock point will dominate the span and
+        drive the bracket low, which biases the position outward.
+
+        The two sides are not equally useful.  The UPPER bound is what does the
+        work, because railing to a long focal length is the failure mode, and it
+        is set by the SMALLEST relief in `terrain_reliefs_deg` -- a robust number,
+        since it only asserts that no candidate position sees less than that.  The
+        lower bound is set by the largest relief and is usually far too loose to
+        bind: over the Tahoe candidate set the bracket came out 17-173 px/deg,
+        and the solution sat at 143.
+    '''
+    relief_px = float(relief_px)
+    r = np.asarray([float(v) for v in terrain_reliefs_deg], dtype=float)
+    r = r[np.isfinite(r) & (r > 0)]
+    if relief_px <= 0 or r.size == 0:
+        raise ValueError('need a positive pixel relief and at least one '
+                         'positive terrain relief')
+    lo_deg = float(r.min()) * (1.0 - margin)
+    hi_deg = float(r.max()) * (1.0 + margin)
+    if lo_deg <= 0:
+        raise ValueError('margin too large: lower relief bound is non-positive')
+    # bigger angular relief for the same pixels means a SHORTER focal length,
+    # so the degree bounds invert on the way through.
+    return relief_px / hi_deg, relief_px / lo_deg
+
+
 def position_dilution(features, sigma_deg, eye_m, k=K_REFRACTION,
                       biases_free=True, focal_free=False):
     ''' Expected 1-sigma position error, km, from a given angular accuracy.

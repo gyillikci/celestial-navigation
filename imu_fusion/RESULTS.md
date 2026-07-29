@@ -852,3 +852,101 @@ and with it most of its range information.  Lateral position survives; radial
 position does not.  Denver worked despite being a stock photograph only because
 the *near* landmark supplied an angle that a common scale cannot fake.  Tahoe
 had no near landmark, and nothing to replace it.
+
+## The same scene from the original file: what a null result was actually hiding
+
+The previous section blamed the failure on an unknown focal length, and that was
+right as far as it went.  It was not the whole story, and the way to find out was
+to remove the *other* handicap: stop photographing a laptop and use the file.
+
+**Finding it.** The wallpaper is `26-Tahoe-Beach-Day.png`, **6016 × 3384**,
+mirrored in a public GitHub wallpaper archive.  **There is no EXIF.**  512 Pixels
+re-exports these as PNG, which strips the maker note, the focal length and
+everything else — so the scale stayed unknown and the third nuisance parameter
+stayed in force.  What the original does supply is *geometry*:
+
+| | screen photo | original file |
+|---|---|---|
+| usable crest columns | 1 800 | **5 070** |
+| vertical relief of the crest | 72 px | **129 px** |
+| horizontal field | 19° | **42°** |
+| extra projections to undo | keystone, moiré, LCD grid | none |
+
+macOS displays this wallpaper cropped; the photograph of the screen therefore
+captured about a third of the frame's azimuth span.  Shape, not sharpness, is
+what a resection reads, and two thirds of the shape had simply been missing.
+
+**It still failed with the scale free.**  Searching *f* over 60–520 px/deg pinned
+it at 510 and returned scattered positions at 2.2–2.7′ — the same non-fix as
+before, on three times the data.  A free scale is not a wide prior; it is a
+licence to rail.
+
+**Bounding the scale physically fixed it.**  The extraction has already measured
+the relief — 129 px of crest, once the near rock point is masked — and the DEM
+says how many degrees that can be.  The binding side is the *upper* bound on *f*,
+because railing to 510 is the failure: `f_hi = relief_px / (smallest angular
+relief any candidate shows)`.  Rendered over the 42° arc, no position in the
+basin subtends less than **1.00°**, so with a 25% margin *f* ≤ **173 px/deg**.
+The run reported here used a hand-set 100–176; the mechanically derived bracket
+is 17–173, and the lower bound never binds — the solution sits at 143, near the
+top.  The same search then converged:
+
+| rms | position | ground | azimuth | field | roll |
+|---|---|---|---|---|---|
+| **2.12′** | **39.2230 N 120.0080 W** | 1899 m | 220.2° | 42.1° | +0.06° |
+| 2.14′ | 39.2250 N 120.0100 W | 1920 m | 219.6° | 41.8° | +0.03° |
+| 2.20′ | 39.2250 N 120.0080 W | 1925 m | 219.8° | 41.5° | +0.02° |
+| 2.28′ | 39.2270 N 120.0120 W | 1921 m | 219.0° | 41.2° | +0.02° |
+
+Every row within **600 m**, azimuth within 1.2°, and the roll comes out at
++0.06° without ever being forced — the level horizon a landscape photograph
+should have, which the failed search had to buy at −3.3°.
+
+![Lake Tahoe resection](results/fig_tahoe_resection.png)
+
+**That it is a minimum, not a preference.**  A winning residual proves nothing on
+its own; separation does.  Across the 140 shoreline candidates the median is
+**10.29′** and the worst 68′, and *nothing further than 10 km away scores better
+than 7.23′* — a factor of 3.4 between the answer and the whole rest of the lake.
+The failed screen-photo search had its top eight inside 0.4′ of each other and
+scattered over 30 km.
+
+**Where it is.**  39.2230 N 120.0080 W is the tip of **Stateline Point**, at the
+California–Nevada line between Crystal Bay and Agate Bay, looking **south-west
+down the length of the lake**.  The DEM neighbourhood confirms it is genuine
+land, not a spike: a ridge running up to 2174 m to the north, water at 1898 m to
+the south, east and west.  On that skyline it puts **Rubicon Peak at 26 km,
+Jakes Peak at 25 km and Ellis Peak at 24 km**.
+
+This corrects the earlier reading.  The screen-photo section called the scene
+"the Nevada east shore looking west" and used Sand Harbor as the rough position.
+It is the **north** shore looking south-west, 7.4 km away — and Sand Harbor
+scores 6.73′, three times worse than the answer.  The rough position was wrong,
+and the wide frame is what exposed it.
+
+### The honest uncertainty is not the one the sample count suggests
+
+1 268 samples at 2.18′ rms would be 0.06′ on the mean if the residual were white.
+It is not: the integrated autocorrelation gives **n_eff = 33**, a **6.2×**
+inflation, so the honest figure is **0.38′**.  The residual panel shows why —
+smooth excursions tens of degrees wide, which is exactly what a position shift
+looks like.  Combined with the ~600 m spread of the top fits, the defensible
+claim is **≈1 km, 1σ** — not the 100 m the raw residual would flatter.
+
+### What this changes in the code
+
+`resection_geometry.focal_bounds_from_relief(relief_px, terrain_reliefs_deg)`
+turns the measured pixel relief and a DEM-derived angular relief into an *f*
+bracket, with the inversion (more degrees for the same pixels ⇒ shorter focal
+length) and the foreground-masking caveat written down where they can be tested
+rather than rediscovered.  Masking matters: unmasked, the near rock point and its
+pine take the relief from 129 px to 242 px and drive the bracket low, which
+pushes the solved position outward.
+
+**The revised lesson.** An unknown scale is not the same as an unconstrained one.
+`focal_absorbed_radial` correctly says radial position is degenerate with focal
+length *to first order*; what the original file shows is that a wide enough frame
+carries enough departure from proportionality to break the degeneracy — provided
+the search is not simultaneously allowed to rail the scale to an unphysical
+value.  Denver needed a near landmark because its field was 5.4°.  Tahoe did not,
+because its field was 42°.
