@@ -1937,5 +1937,99 @@ class TestResectionGeometry(unittest.TestCase):
         self.assertGreater(s["sigma_inflation"], 3.0)
 
 
+class TestTerrainBiasFactors(unittest.TestCase):
+    """The nuisance biases, modelled as graph variables instead of noise."""
+
+    LAT, LON, EYE = 39.644, -104.878, 1695.0
+
+    def _landmarks(self, near=True):
+        from imu_fusion.terrain_factors import Landmark
+        lms = [Landmark("longs", 40.2549, -105.6151, 4346),
+               Landmark("p2", 40.18, -105.65, 3960),
+               Landmark("p3", 40.28, -105.52, 3818)]
+        if near:
+            lms.append(Landmark("tower", 39.74298, -104.99051, 1770))
+        return lms
+
+    def _solve(self, bear, elev, **kw):
+        from imu_fusion.terrain_factors import solve_landmark_fix
+        return solve_landmark_fix(
+            bearings=[(l, b, 0.05) for l, b in bear],
+            elevations=[(l, e, 0.05) for l, e in elev],
+            lat0=self.LAT, lon0=self.LON, prior_en_m=(0.0, 0.0),
+            prior_sigma_km=50.0, cam_height_m=self.EYE, **kw)
+
+    def test_compass_bias_as_a_variable_rescues_the_fix(self):
+        """A 1.5 deg heading error is ordinary for a phone magnetometer.  Left
+        out of the model it does not merely widen the answer -- it moves it by
+        over ten kilometres, because a common bearing offset is exactly what a
+        lateral position shift looks like.  As an estimated variable shared by
+        every bearing, it is absorbed and the position comes back."""
+        from imu_fusion.terrain_factors import synthesize_measurements
+        lms = self._landmarks()
+        bear, elev, _ = synthesize_measurements(self.LAT, self.LON, lms,
+                                                cam_height_m=self.EYE,
+                                                heading_bias_deg=1.5)
+        naive = self._solve(bear, elev, compass_bias_sigma_deg=0.0)
+        modelled = self._solve(bear, elev, compass_bias_sigma_deg=2.0)
+        self.assertGreater(math.hypot(naive["east_m"], naive["north_m"]), 5000.0)
+        self.assertLess(math.hypot(modelled["east_m"], modelled["north_m"]), 50.0)
+        self.assertAlmostEqual(modelled["compass_bias_deg"], 1.5, delta=0.02)
+
+    def test_pitch_bias_as_a_variable_rescues_the_fix(self):
+        """+0.87 deg is what this study MEASURED on a real device standing
+        still, and +1.50 deg from a moving car.  Either would throw a
+        terrain fix by kilometres if elevations are assumed unbiased."""
+        from imu_fusion.terrain_factors import synthesize_measurements
+        lms = self._landmarks()
+        bear, elev, _ = synthesize_measurements(self.LAT, self.LON, lms,
+                                                cam_height_m=self.EYE)
+        elev = [(l, e + 0.9) for l, e in elev]
+        naive = self._solve(bear, elev, pitch_bias_sigma_deg=0.0)
+        modelled = self._solve(bear, elev, pitch_bias_sigma_deg=1.5)
+        self.assertGreater(math.hypot(naive["east_m"], naive["north_m"]), 3000.0)
+        self.assertLess(math.hypot(modelled["east_m"], modelled["north_m"]), 50.0)
+        self.assertAlmostEqual(modelled["pitch_bias_deg"], 0.9, delta=0.02)
+
+    def test_a_near_landmark_shrinks_the_reported_ellipse(self):
+        """With the biases estimated, the covariance finally tells the truth
+        about range spread: adding one landmark at 15 km to a set otherwise at
+        89-93 km must collapse the across-track axis by a large factor.  This is
+        the same conclusion `resection_geometry` reaches from geometry alone."""
+        from imu_fusion.terrain_factors import synthesize_measurements
+        out = {}
+        for tag, near in (("far", False), ("near", True)):
+            lms = self._landmarks(near=near)
+            bear, elev, _ = synthesize_measurements(self.LAT, self.LON, lms,
+                                                    cam_height_m=self.EYE)
+            out[tag] = self._solve(bear, elev, compass_bias_sigma_deg=2.0,
+                                   pitch_bias_sigma_deg=1.5)
+        self.assertLess(out["near"]["semi_minor_km"],
+                        out["far"]["semi_minor_km"] / 5.0)
+        for tag in ("far", "near"):
+            self.assertGreater(out[tag]["semi_major_km"],
+                               out[tag]["semi_minor_km"] * 2.0,
+                               f"{tag}: covariance should still read as a line "
+                               f"of position")
+
+    def test_calibrated_sigma_inflates_only_for_correlated_residual(self):
+        """A dense skyline match is not hundreds of independent looks.  The
+        sigma handed to a factor must be inflated by sqrt(n / n_eff), or the
+        graph reports a covariance an order of magnitude too tight."""
+        import numpy as np
+        from imu_fusion.terrain_factors import calibrated_sigma_deg
+        rng = np.random.default_rng(11)
+        az = np.linspace(120.0, 140.0, 800)
+        white = rng.normal(0, 0.05, 800)
+        smooth = np.convolve(rng.normal(0, 1, 800 + 200),
+                             np.ones(200) / 200, mode="valid")[:800]
+        smooth *= 0.05 / smooth.std()
+        w = calibrated_sigma_deg(az, white)
+        c = calibrated_sigma_deg(az, smooth)
+        self.assertLess(w["inflation"], 1.5)
+        self.assertGreater(c["inflation"], 3.0)
+        self.assertGreater(c["sigma_deg"], 2.5 * w["sigma_deg"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -733,3 +733,47 @@ should be inflated by `sigma_inflation` before it is believed.
   degenerates.  Branch-picking by hand is the same class of sign reasoning that
   has failed three separate times in this project, so it is no longer done by
   hand.
+
+
+## Closing the loop: the biases belong in the graph, not in the sigmas
+
+The field measurements left one gap — `effective_samples` could say how much to
+inflate an uncertainty, but nothing fed that into the terrain factors, so
+`solve_landmark_fix` still reported covariances that flattered themselves.
+
+The fix turned out not to be inflation at all. A compass error is COMMON to every
+bearing taken at one moment and a pitch error common to every elevation; smearing
+them into per-measurement sigmas both over-counts the noise and lets the fit
+pretend the errors average down. So `landmark_bearing_factor` and
+`landmark_elevation_factor` now optionally take a `bias_key`, and
+`solve_landmark_fix` grows `compass_bias_sigma_deg` / `pitch_bias_sigma_deg`,
+which make each bias a shared, estimated variable with a prior of that width.
+
+**What that is worth, on the biases this study actually measured:**
+
+| injected error | bias not modelled | bias as a graph variable | recovered |
+|---|---|---|---|
+| compass +1.5° (ordinary phone magnetometer) | **12.4 km** off | **2 m** off | +1.499° |
+| pitch +0.9° (measured, standing at a fence) | **9.6 km** off | **2 m** off | +0.900° |
+
+A degree and a half of heading error does not widen a terrain fix — it *moves*
+it by twelve kilometres, because a common bearing offset is precisely what a
+lateral position shift looks like. The +1.50° pitch bias measured from a moving
+car and the +0.87° measured standing still are both large enough to do the same.
+
+**And the covariance now reads honestly.** With the biases estimated, the
+reported ellipse shows the line-of-position elongation instead of hiding it, and
+adding one landmark at 15 km to a set otherwise at 89–93 km collapses the
+across-track axis by more than 5× — the same conclusion `resection_geometry`
+reaches from geometry alone, now arrived at independently through GTSAM's own
+marginals.
+
+Where the two disagree is instructive rather than troubling: `position_dilution`
+credits only the near–far *difference* and so is deliberately conservative on the
+along-track axis, while the graph fuses bearings and elevations together and does
+better. They agree on the verdict, on the elongation, and on the across-track
+axis, which are the parts that decide whether a viewpoint is usable.
+
+`calibrated_sigma_deg` supplies the remaining piece: the per-observation sigma
+inflated by sqrt(n / n_eff), for the correlated residual that survives after the
+common mode has been taken out.

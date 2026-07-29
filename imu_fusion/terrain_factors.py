@@ -93,12 +93,28 @@ class Landmark:
 # --------------------------------------------------------------------------- #
 
 def landmark_bearing_factor(key, landmark: Landmark, meas_bearing_deg: float,
-                            sigma_deg: float, lat0: float, lon0: float):
+                            sigma_deg: float, lat0: float, lon0: float,
+                            bias_key=None):
     ''' Absolute bearing to a surveyed landmark -> a line of position through it.
 
-        `sigma_deg` should already include the heading-reference error; build it
-        with `bearing_sigma_deg`. '''
+        With `bias_key`, the factor becomes BINARY on (pose, compass bias) and a
+        single bias variable is shared by every bearing in the frame.  That is
+        the honest model and it changes the answer, not just the bookkeeping:
+
+          * a compass error is COMMON to all bearings taken at one moment, not
+            independent per landmark, so inflating each sigma by the
+            magnetometer error both over-counts the noise and lets the fit
+            pretend the errors average down;
+          * moving across the line of sight swings every bearing by nearly the
+            same amount, which is exactly what a compass bias looks like -- so
+            with the bias estimated, the graph's own covariance reports the
+            resulting line-of-position elongation instead of hiding it.
+
+        Without `bias_key` the factor stays unary and `sigma_deg` must already
+        carry the heading error (see `bearing_sigma_deg`).
+    '''
     noise = gtsam.noiseModel.Isotropic.Sigma(1, sigma_deg * _DEG)
+    keys = [key] if bias_key is None else [key, bias_key]
 
     def predict(pose):
         t = pose.translation()
@@ -107,8 +123,10 @@ def landmark_bearing_factor(key, landmark: Landmark, meas_bearing_deg: float,
 
     def error(this, values, H):
         pose = values.atPose3(this.keys()[0])
+        bias = (float(values.atVector(this.keys()[1])[0])
+                if bias_key is not None else 0.0)
         base = predict(pose)
-        resid = wrap180(base - meas_bearing_deg)
+        resid = wrap180(base + bias - meas_bearing_deg)
         if H is not None:
             # wrap-safe reduced difference on (east, north)
             jac = np.zeros((1, 6), order="F")
@@ -117,20 +135,29 @@ def landmark_bearing_factor(key, landmark: Landmark, meas_bearing_deg: float,
                 d = np.zeros(6); d[i] = eps
                 jac[0, i] = wrap180(predict(pose.retract(d)) - base) / eps
             H[0] = jac
+            if bias_key is not None:
+                H[1] = np.ones((1, 1), order="F")
         return np.array([resid])
 
-    return gtsam.CustomFactor(noise, [key], error)
+    return gtsam.CustomFactor(noise, keys, error)
 
 
 def landmark_elevation_factor(key, landmark: Landmark, meas_elev_deg: float,
                               sigma_deg: float, lat0: float, lon0: float,
                               cam_height_m: float = 2.0,
-                              k: float = K_REFRACTION):
+                              k: float = K_REFRACTION, bias_key=None):
     ''' Vertical angle to a summit of known height -> a RANGE (distance circle).
 
         Compass-free.  Uses the same curvature+refraction model as
-        `landfall.vertical_angle_deg`. '''
+        `landfall.vertical_angle_deg`.
+
+        With `bias_key`, a single PITCH bias is shared by every elevation in the
+        frame.  Measured on real Theodolite frames this bias was +1.50 deg from a
+        moving car and +0.87 deg standing still -- large enough that treating
+        elevations as unbiased is not an option, and common-mode enough that
+        inflating each sigma separately would be the wrong correction. '''
     noise = gtsam.noiseModel.Isotropic.Sigma(1, sigma_deg * _DEG)
+    keys = [key] if bias_key is None else [key, bias_key]
 
     def predict(pose):
         t = pose.translation()
@@ -141,12 +168,16 @@ def landmark_elevation_factor(key, landmark: Landmark, meas_elev_deg: float,
 
     def error(this, values, H):
         pose = values.atPose3(this.keys()[0])
+        bias = (float(values.atVector(this.keys()[1])[0])
+                if bias_key is not None else 0.0)
         base = predict(pose)
         if H is not None:
             H[0] = _reduced_en_jacobian(pose, predict, base)
-        return np.array([base - meas_elev_deg])
+            if bias_key is not None:
+                H[1] = np.ones((1, 1), order="F")
+        return np.array([base + bias - meas_elev_deg])
 
-    return gtsam.CustomFactor(noise, [key], error)
+    return gtsam.CustomFactor(noise, keys, error)
 
 
 def landmark_horizontal_angle_factor(key, lm_a: Landmark, lm_b: Landmark,
@@ -187,21 +218,64 @@ def landmark_horizontal_angle_factor(key, lm_a: Landmark, lm_b: Landmark,
 # A small standalone landmark fix (the terrain analogue of `solve`)
 # --------------------------------------------------------------------------- #
 
+def calibrated_sigma_deg(azimuths, residuals_deg, floor_deg=0.005):
+    ''' Per-observation sigma that accounts for CORRELATED residual.
+
+        A dense skyline match returns hundreds of samples, and treating them as
+        independent is how an uncertainty comes to look an order of magnitude
+        better than it is.  On the Istanbul frames, 839 samples at 0.14 deg would
+        have given ~15 m of lateral position if the noise were white; they gave
+        nothing, because the residual is smooth in azimuth -- extraction bias,
+        haze-dependent edge placement, DEM error, a pitch bias drifting between
+        frames -- and correlated error is precisely what a position shift looks
+        like.
+
+        So the sigma handed to a factor is the raw scatter INFLATED by
+        sqrt(n / n_eff), which is equivalent to admitting you have n_eff
+        independent looks rather than n.  Returns dict(sigma_deg, raw_deg,
+        n, n_eff, inflation).
+    '''
+    from .resection_geometry import effective_samples
+    r = np.asarray(residuals_deg, float)
+    ok = np.isfinite(r)
+    raw = float(np.std(r[ok])) if ok.sum() > 1 else float("nan")
+    e = effective_samples(np.asarray(azimuths, float)[ok], r[ok])
+    return dict(sigma_deg=max(raw * e["sigma_inflation"], floor_deg),
+                raw_deg=raw, n=e["n"], n_eff=e["n_eff"],
+                inflation=e["sigma_inflation"])
+
+
 def solve_landmark_fix(bearings=(), elevations=(), horizontal_angles=(),
                        lat0: float = 0.0, lon0: float = 0.0,
                        prior_en_m=(0.0, 0.0), prior_sigma_km: float = 30.0,
-                       cam_height_m: float = 2.0, k: float = K_REFRACTION):
+                       cam_height_m: float = 2.0, k: float = K_REFRACTION,
+                       compass_bias_sigma_deg: float = 0.0,
+                       pitch_bias_sigma_deg: float = 0.0):
     ''' Fuse terrain-landmark observations into one position fix.
 
         bearings          : [(Landmark, measured_bearing_deg, sigma_deg), ...]
         elevations        : [(Landmark, measured_elev_deg,   sigma_deg), ...]
         horizontal_angles : [(LandmarkA, LandmarkB, measured_angle_deg, sigma_deg), ...]
 
-        Returns dict(lat, lon, east_m, north_m, cov_en, sigma_km, n_factors).
-        The attitude and height DOFs are pinned by a tight prior — these
-        observables constrain horizontal position only.
+        NUISANCE BIASES.  Give `compass_bias_sigma_deg` and/or
+        `pitch_bias_sigma_deg` and the corresponding bias becomes an ESTIMATED
+        VARIABLE shared by every observation of that type, with a prior of that
+        width, rather than being smeared into each measurement's sigma.  This is
+        the difference between a covariance you can act on and one that flatters
+        itself: the two biases absorb exactly the two first-order signals a
+        position shift produces, so with them in the graph the reported ellipse
+        shows the real line-of-position elongation.  `resection_geometry` predicts
+        the same ellipse from geometry alone, and the two agree.
+
+        Set them to 0 (the default) to keep the old unary behaviour, in which
+        case `sigma_deg` must already carry the heading error.
+
+        Returns dict(lat, lon, east_m, north_m, cov_en, sigma_km, n_factors,
+        compass_bias_deg, pitch_bias_deg, semi_major_km, semi_minor_km,
+        major_bearing_deg).
     '''
     X = gtsam.symbol_shorthand.X
+    B = gtsam.symbol_shorthand.B
     graph = gtsam.NonlinearFactorGraph()
 
     prior_pose = gtsam.Pose3(gtsam.Rot3(),
@@ -211,35 +285,61 @@ def solve_landmark_fix(bearings=(), elevations=(), horizontal_angles=(),
     graph.add(gtsam.PriorFactorPose3(
         X(0), prior_pose, gtsam.noiseModel.Diagonal.Sigmas(sig)))
 
+    ck = B(0) if compass_bias_sigma_deg > 0 else None
+    pk = B(1) if pitch_bias_sigma_deg > 0 else None
+    if ck is not None:
+        graph.add(gtsam.PriorFactorVector(
+            ck, np.array([0.0]),
+            gtsam.noiseModel.Isotropic.Sigma(1, compass_bias_sigma_deg)))
+    if pk is not None:
+        graph.add(gtsam.PriorFactorVector(
+            pk, np.array([0.0]),
+            gtsam.noiseModel.Isotropic.Sigma(1, pitch_bias_sigma_deg)))
+
     n = 0
-    for lm, meas, s in bearings:
-        graph.add(landmark_bearing_factor(X(0), lm, meas, s, lat0, lon0)); n += 1
-    for lm, meas, s in elevations:
-        graph.add(landmark_elevation_factor(X(0), lm, meas, s, lat0, lon0,
-                                            cam_height_m=cam_height_m, k=k)); n += 1
-    for lm_a, lm_b, meas, s in horizontal_angles:
-        graph.add(landmark_horizontal_angle_factor(X(0), lm_a, lm_b, meas, s,
+    for lm, meas, s_ in bearings:
+        graph.add(landmark_bearing_factor(X(0), lm, meas, s_, lat0, lon0,
+                                          bias_key=ck)); n += 1
+    for lm, meas, s_ in elevations:
+        graph.add(landmark_elevation_factor(X(0), lm, meas, s_, lat0, lon0,
+                                            cam_height_m=cam_height_m, k=k,
+                                            bias_key=pk)); n += 1
+    for lm_a, lm_b, meas, s_ in horizontal_angles:
+        graph.add(landmark_horizontal_angle_factor(X(0), lm_a, lm_b, meas, s_,
                                                    lat0, lon0)); n += 1
 
     initial = gtsam.Values()
     initial.insert(X(0), prior_pose)
+    if ck is not None:
+        initial.insert(ck, np.array([0.0]))
+    if pk is not None:
+        initial.insert(pk, np.array([0.0]))
     result = gtsam.LevenbergMarquardtOptimizer(
         graph, initial, gtsam.LevenbergMarquardtParams()).optimize()
 
     pose = result.atPose3(X(0))
     t = pose.translation()
     lat, lon = enu_to_latlon(t[0], t[1], lat0, lon0)
-    cov_en = None
-    sigma_km = float("nan")
+    out = dict(lat=lat, lon=lon, east_m=float(t[0]), north_m=float(t[1]),
+               cov_en=None, sigma_km=float("nan"), n_factors=n,
+               compass_bias_deg=(float(result.atVector(ck)[0]) if ck else 0.0),
+               pitch_bias_deg=(float(result.atVector(pk)[0]) if pk else 0.0),
+               semi_major_km=float("nan"), semi_minor_km=float("nan"),
+               major_bearing_deg=float("nan"))
     try:
         marg = gtsam.Marginals(graph, result)
         cov = marg.marginalCovariance(X(0))[3:5, 3:5]
-        cov_en = cov
-        sigma_km = float(np.sqrt(np.trace(cov)) / 1000.0)
+        out["cov_en"] = cov
+        out["sigma_km"] = float(np.sqrt(np.trace(cov)) / 1000.0)
+        # the ellipse itself, because "one sigma" hides a line of position
+        w, v = np.linalg.eigh(cov)
+        out["semi_major_km"] = float(np.sqrt(max(w[1], 0.0)) / 1000.0)
+        out["semi_minor_km"] = float(np.sqrt(max(w[0], 0.0)) / 1000.0)
+        out["major_bearing_deg"] = float(
+            degrees(atan2(v[0, 1], v[1, 1])) % 180.0)
     except Exception:                                    # pragma: no cover
         pass
-    return dict(lat=lat, lon=lon, east_m=float(t[0]), north_m=float(t[1]),
-                cov_en=cov_en, sigma_km=sigma_km, n_factors=n)
+    return out
 
 
 def synthesize_measurements(lat: float, lon: float, landmarks,
