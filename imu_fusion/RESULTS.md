@@ -1100,3 +1100,49 @@ forest all reflect it (50–210).  And going down the frame the order is mountai
 foot, far waterline, open lake, boulders, nearer lake — so the **first** water
 below the range is the far shore.  Taking the lowest water run instead latches
 onto water beyond the foreground boulders, which put the first attempt 17′ low.
+
+### Dropping the waterline prior: it was never load-bearing
+
+Every Tahoe solve above leaned on one sentence of image reading — the boulders
+stand in ankle-deep water, so the camera is at the lake surface — which turned a
+two-dimensional search over the basin into a one-dimensional ring of 140
+candidates.  That is a prior, and it was never priced.  So drop it: search **all
+2 640 land cells** in the same box, ground height from the DEM at each.
+
+| | shoreline ring (140 cells) | all land (2 640 cells) |
+|---|---|---|
+| winner | 39.2230 −120.0080 | 39.2250 −120.0100 |
+| distance between them | — | **0.28 km** |
+| separation | 2.90× | 2.37× |
+| median residual | 10.29′ | 10.19′ |
+
+Cells within 600 m of the constrained answer come back at **ranks 0, 1 and 2 of
+2 639**.  Nineteen times the search space, and the same place wins.
+
+**So the waterline prior bought speed, not the fix.**  This corrects the framing
+used while setting the search up, where it was described as the constraint that
+made the problem tractable at all.  It made it 19× cheaper.
+
+Note that an unknown eye height was never what was being tested: the constant
+term of the fit is a free vertical offset, so height was always absorbed.  What
+this drops is the *candidate restriction*, and the shape of a 42° skyline turns
+out to be specific enough not to need it.
+
+**The real cost of losing the waterline is the observable, not the prior.**
+Without it there is no waterline-to-summit extent, and with it goes a 0.48 km
+rangefinder that is immune to pitch bias — the 0.29 km radial axis in the table
+above collapses back into the focal-length degeneracy.  Those are two different
+losses and only the second one matters:
+
+| what is lost | cost |
+|---|---|
+| waterline as a **position prior** | 0.28 km, separation 2.90 → 2.37, 19× more compute |
+| waterline as an **observable** | the radial axis: 0.29 km → focal-degenerate |
+| sea horizon as an **attitude reference** (celestial) | 13× standalone at sea, 2× inside the fusion |
+
+**The pattern across all three.**  Waterline-to-summit is the terrain analogue of
+the ultrawide optical horizon, and both are the same trick as Δq(Sun−Moon) in the
+factor graph: difference two features *within one frame* so the platform's
+attitude error cancels, rather than measure any one angle better.  Every absolute
+angle in this study has a nuisance parameter sitting on it; the fixes come from
+differences.
