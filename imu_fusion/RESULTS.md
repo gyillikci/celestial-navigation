@@ -1286,3 +1286,48 @@ that full texts were unreachable):
 5. **Judge against the field's 1 km criterion** — Baatz et al. report 88% of 200+
    images within 1 km.  By that standard the Tahoe result is *at* the state of the
    art, not a disappointment, and Bodrum is simply not solved.
+
+### Correction: there is no sea horizon in that clip — and what to use instead
+
+I proposed taking attitude from the horizon, citing the sea horizon as "plainly
+visible" in the pan.  It is not there at all.  The bay is enclosed: in every
+frame the water meets **land** — the opposite peninsula — never sky.  What looks
+like a horizon is a *coastline*, whose depression depends on its range, which is
+the weak and two-fold-ambiguous observable already characterised in
+`waterline_range`.  So the published horizon-first recipe cannot be applied to
+this clip as written.
+
+The correction points somewhere better.  The **coastline** is the right feature,
+for a reason that has nothing to do with attitude: it is the one thing in the
+scene whose height is known *everywhere* (sea level), so its depression is a pure
+function of range, and **crest minus coastline at the same azimuth is pitch-free**
+because both are read in the same frame.  That cancels the drift that wrecked the
+solve, whatever its azimuth dependence.
+
+And this scene meets the condition Tahoe could not:
+
+| | Tahoe peaks | Bodrum coastline across the sweep |
+|---|---|---|
+| range spread | 23.8–26.3 km, **11%** | 0.7–42.3 km, **60×** |
+| depression range | — | 337′ (5.6°) |
+
+The 11% spread is exactly why the Tahoe extents could not determine position and
+scale together.  A 60× spread is a different problem.
+
+**Blocked on extraction, not on geometry.**  The crest extracts cleanly (verified
+by overlay on four frames across the pan).  The coastline does not: at dusk both
+water and land sit near `r−b = −30`, and the mechanism that separates them —
+distant land hazing warm to about −14 while water stays at about −40 — is too
+weak and too variable.  Per-column thresholding gives 55% coverage that is
+visibly wrong, scattering into open water and, in the last frame, jumping to the
+ridge top.
+
+Note the sign flip against Lake Tahoe, where water was the *red-dark* class.
+Here water is the *bluer* class and the step runs the other way.  The cue is
+scene-dependent; only the geometry is not.
+
+This puts the continuity-constrained extractor (shortest path / dynamic
+programming across columns, as the classical skyline literature does) on the
+critical path rather than in the nice-to-have list: a smooth-and-continuous prior
+is precisely what rejects the scattered mislocks that per-column thresholding
+cannot.
