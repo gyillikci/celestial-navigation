@@ -1060,8 +1060,9 @@ what *cancels*, because both angles are read in one image at one azimuth:
 The pitch cancellation is the valuable one.  A free vertical offset is precisely
 what absorbs radial position in a skyline fit — it is nuisance parameter number
 two — and this observable is blind to it.  The focal length does *not* cancel,
-since the extent is still measured in pixels; but ranges to three or more summits
-determine position **and** scale together, which a skyline shape alone cannot.
+since the extent is still measured in pixels.  *(An earlier version of this
+section claimed three or more summits then determine position and scale together.
+That is wrong on this scene — see the correction below.)*
 
 **The setback is the only thing that genuinely breaks it**, and it is forgiving.
 The residual term is `setback/(2 R_eff)`:
@@ -1146,3 +1147,49 @@ factor graph: difference two features *within one frame* so the platform's
 attitude error cancels, rather than measure any one angle better.  Every absolute
 angle in this study has a nuisance parameter sitting on it; the fixes come from
 differences.
+
+### Correction: the waterline does not replace the focal bound
+
+The section above priced the waterline-to-summit observable and validated it
+out-of-sample, then claimed ranges to three summits "determine position **and**
+scale together".  Pricing is a Fisher calculation and assumes the model; it is
+not evidence.  Putting the observable into the objective and re-solving with the
+scale free shows the claim is wrong on this scene.
+
+Same 140 candidates, *f* free over 60–520 in both runs:
+
+| objective | best | position | *f* | from the bounded answer | separation |
+|---|---|---|---|---|---|
+| crest only | 2.69′ | 39.1350 −120.1550 | **railed 516** | 16.01 km | **1.00×** |
+| crest **+ waterline** | 2.77′ | 39.3550 −120.0550 | **railed 516** | 15.22 km | **1.28×** |
+
+It helped, and visibly: separation went from 1.00× to 1.28×, and the correct
+place now appears at ranks 2 and 3 with *f* = 148 and 140, against the bounded
+solve's 143 — it had appeared nowhere at all before.  But it did not win, and
+the scale still railed.
+
+**Why, and it is not a bug.**  The extent is `f·ΔH/d`, so each summit measures
+the **ratio** *f/d*, never *d* itself.  Recovering position and scale together
+therefore needs summits spanning a wide range of **distances**, not merely of
+bearings — and a lake basin does not provide that.  The three Tahoe peaks lie
+between 23.8 and 26.3 km, an **11% spread**, across 20° of bearing:
+
+| | σ across | σ along | σ_f | condition number |
+|---|---|---|---|---|
+| focal length **known** | 1.77 km | **0.28 km** | — | well posed |
+| focal length **unknown** | 13.2 km | 5.6 km | **55%** | **1.7 × 10⁶** |
+
+So the honest summary of what the waterline is worth:
+
+- **With the scale known or bounded** — a real gain: 0.28 km radially, and an
+  observable immune to the pitch bias, confirmed by the 1.93′ out-of-sample
+  prediction of the far shoreline.
+- **With the scale free** — it is *not* a substitute for
+  `focal_bounds_from_relief`.  The two are complementary, and the bound is still
+  what makes the search converge.
+
+The general form of the lesson, which is the third time this study has met it:
+an observable that measures a *ratio* cannot break the degeneracy between the
+two things whose ratio it measures.  The near tower at Denver worked because it
+was 15 km against 92 — a 6× spread in range.  Tahoe's peaks are all the same
+distance away, so they all say the same thing.

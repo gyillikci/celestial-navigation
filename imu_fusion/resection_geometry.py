@@ -295,9 +295,21 @@ def waterline_to_summit(distance_km_, height_above_water_m, eye_above_water_m,
 
         The pitch cancellation is the valuable one: a free vertical offset is
         what absorbs radial position in a skyline fit, and this observable is
-        blind to it.  What does NOT cancel is the focal length -- the extent is
-        still measured in pixels -- but ranges to three or more summits determine
-        position and scale together, which a skyline shape alone cannot.
+        blind to it.
+
+        What does NOT cancel is the focal length, and that limit is sharper than
+        it first looks.  The extent is f * dH / d, so each summit measures the
+        RATIO f/d, not d.  Recovering position and scale together therefore needs
+        summits spanning a wide range of DISTANCES, not merely of bearings -- and
+        a lake basin does not provide that.  On the three Tahoe peaks (23.8-26.3
+        km, an 11% spread, 20 degrees of bearing) the (x, y, log f) system has a
+        condition number of 1.7e6: sigma_f 55%, sigma_x 13 km.  Solving the real
+        photograph with f free confirmed it -- adding the waterline moved the
+        separation only from 1.00x to 1.28x and the scale still railed.
+
+        So this observable buys precision when the scale is known or bounded
+        (1.77 x 0.28 km on that scene), and it does NOT substitute for
+        `focal_bounds_from_relief`.  Treat the two as complementary.
 
         `setback_km` is how far the summit stands behind the shore, the one thing
         that genuinely breaks the cancellation.  It is remarkably forgiving: the

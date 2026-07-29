@@ -1945,6 +1945,48 @@ class TestResectionGeometry(unittest.TestCase):
         with self.assertRaises(ValueError):
             waterline_to_summit(0.0, 917.0, 1.6)
 
+    def test_waterline_extents_do_not_recover_an_unknown_scale(self):
+        """The extent measures f/d, not d -- so it needs a spread of DISTANCES.
+
+        Guards a claim this study got wrong once: that ranges to three summits
+        determine position and scale together.  They do only when the summits are
+        at genuinely different distances.  The three Tahoe peaks span 11% in range
+        and 20 degrees of bearing, and the system is near-singular; solving the
+        real photograph with f free confirmed it.
+        """
+        import numpy as np
+        from imu_fusion.resection_geometry import (bearing_deg, distance_km,
+                                                   waterline_to_summit)
+        sol = (39.2230, -120.0080)
+        peaks = [(39.0086, -120.1372, 2814), (39.0233, -120.1420, 2755),
+                 (39.0722, -120.2036, 2645)]
+
+        def system(pk):
+            rows, sig = [], []
+            for pa, po, h in pk:
+                d = distance_km(*sol, pa, po)
+                b = np.radians(bearing_deg(*sol, pa, po))
+                u = np.array([np.cos(b), np.sin(b)])
+                rows.append(np.concatenate([-u / d, [1.0]]))
+                sig.append((2.18 / 60.0) / waterline_to_summit(d, h - 1897.0, 1.6))
+            A, s = np.array(rows), np.array(sig)
+            return (A / s[:, None]).T @ (A / s[:, None])
+
+        W = system(peaks)
+        self.assertGreater(np.linalg.cond(W), 1e5)
+        self.assertGreater(np.sqrt(np.linalg.inv(W)[2, 2]), 0.2)   # sigma_f > 20%
+        # with the scale known the same three peaks are worth sub-km radially
+        A = np.array([r[:2] for r in
+                      [np.concatenate([-np.array([np.cos(np.radians(bearing_deg(*sol, pa, po))),
+                                                  np.sin(np.radians(bearing_deg(*sol, pa, po)))])
+                                       / distance_km(*sol, pa, po), [1.0]])
+                       for pa, po, _ in peaks]])
+        s = np.array([(2.18 / 60.0) / waterline_to_summit(distance_km(*sol, pa, po),
+                                                          h - 1897.0, 1.6)
+                      for pa, po, h in peaks])
+        C = np.linalg.inv((A / s[:, None]).T @ (A / s[:, None]))
+        self.assertLess(np.sqrt(np.linalg.eigvalsh(C)[0]), 0.5)    # km, radial
+
     def test_waterline_depression_is_ambiguous_about_range(self):
         """One depression, two ranges -- and a blind spot between them.
 
