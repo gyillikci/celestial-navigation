@@ -1331,3 +1331,41 @@ programming across columns, as the classical skyline literature does) on the
 critical path rather than in the nice-to-have list: a smooth-and-continuous prior
 is precisely what rejects the scattered mislocks that per-column thresholding
 cannot.
+
+### A continuity-constrained extractor — and the limit it exposes
+
+`skyline_dp` replaces the per-column decision with a **minimum-cost continuous
+path** across the columns: cost is how unlike a boundary each pixel is, plus a
+penalty for moving vertically between neighbours, so a weak but coherent edge
+beats a strong but isolated one.  This is the classical baseline the skyline
+literature has always used and this project should have started from.
+
+Validated on the Bodrum failure mode in miniature — a weak coherent boundary with
+30% of columns carrying a much stronger spurious step:
+
+| | median error | columns >15 px wrong |
+|---|---|---|
+| per-column (the old rule) | 5.0 px | **72 of 300** |
+| `skyline_dp` | 3.0 px | **0** |
+
+The path is a pixel or two less sharp and never jumps.  That is the right trade:
+a boundary that leaps to a rooftop is not a slightly worse measurement, it is a
+wrong one.
+
+**But it did not extract the Bodrum coastline, and the reason is worth keeping.**
+Continuity fixes *incoherent jumping*; it cannot manufacture a cue that is not
+there, and this scene does not have one:
+
+- **Blueness** puts the path 35 px below the crest instead of 300–500.  Going
+  down the frame there are *two* upward steps in `b−r` — sky→land and land→water
+  — and at dusk the first is the stronger, so the path latches onto the crest it
+  was supposed to be measuring below.
+- **Texture** is inconsistent in sign.  In the opening frame the *water* is the
+  more textured class (1–7 against 0.2–0.7) because ripples beat a haze-smoothed
+  distant hillside; 540 frames later the town saturates it at 10–19.
+
+So the coastline observable — geometrically the strongest thing in this scene, a
+known-height contour with a 60× range spread — remains unmeasured, blocked on
+segmentation rather than on geometry or on estimation.  That is where the
+learned-segmentation half of the skyline literature earns its keep, and it is the
+honest next step rather than a third hand-tuned colour rule.

@@ -1834,6 +1834,76 @@ class TestSkylineExtract(unittest.TestCase):
         self.assertGreater(np.isfinite(out[440:]).sum(), 140, "terrain deleted")
 
 
+class TestSkylineDP(unittest.TestCase):
+    """Continuity-constrained boundary tracing, against per-column decisions."""
+
+    def _scene(self, weak=8.0, corrupt=90, seed=1):
+        """A weak coherent boundary plus isolated strong distractors.
+
+        This is the Bodrum dusk failure in miniature: the real land/water step is
+        only a few units, while scattered columns carry a much stronger spurious
+        step.  Per-column thresholding takes the strong one every time.
+        """
+        import numpy as np
+        nr, nc = 200, 300
+        rng = np.random.default_rng(seed)
+        true = (80 + 18 * np.sin(np.linspace(0, 3, nc))).astype(int)
+        img = np.zeros((nr, nc))
+        for c in range(nc):
+            img[true[c]:, c] += weak
+        for c in rng.choice(nc, corrupt, replace=False):
+            img[rng.integers(20, 180):, c] += 45.0
+        return img + rng.normal(0, 2, img.shape), true
+
+    def test_recovers_a_clean_boundary(self):
+        """Sanity: on a noiseless step the path must sit on it."""
+        import numpy as np
+        from imu_fusion.skyline_dp import extract
+        nr, nc = 200, 300
+        true = (80 + 18 * np.sin(np.linspace(0, 3, nc))).astype(int)
+        img = np.zeros((nr, nc))
+        for c in range(nc):
+            img[true[c]:, c] += 40.0
+        y = extract(img, polarity=1.0, smooth=6, max_jump=4, jump_penalty=1.5)
+        self.assertLess(abs(float(np.median(y - true))), 3.0)
+        self.assertLess(float(np.std(y - true)), 4.0)
+
+    def test_beats_per_column_on_scattered_distractors(self):
+        """The whole reason the module exists: no gross mislocks.
+
+        Per-column loses ~70 of 300 columns to the distractors.  The path may be
+        a pixel or two less sharp, but it must not jump -- a boundary that leaps
+        to a rooftop is not a slightly worse measurement, it is a wrong one.
+        """
+        import numpy as np
+        from imu_fusion.skyline_dp import extract, step_cost
+        img, true = self._scene()
+        y = extract(img, polarity=1.0, smooth=6, max_jump=4, jump_penalty=1.5)
+        _, resp = step_cost(img, 1.0, 6)
+        per_col = np.argmax(resp, axis=0)
+        gross_dp = int(np.sum(np.abs(y - true - 3) > 15))
+        gross_pc = int(np.sum(np.abs(per_col - true - 3) > 15))
+        self.assertGreater(gross_pc, 40)
+        self.assertLessEqual(gross_dp, 2)
+
+    def test_band_limits_and_validation(self):
+        """Per-column search limits, and refusal rather than a silent wrong path."""
+        import numpy as np
+        from imu_fusion.skyline_dp import trace, step_cost
+        img, true = self._scene()
+        cost, _ = step_cost(img, 1.0, 6)
+        lo = np.full(img.shape[1], 60.0)
+        hi = np.full(img.shape[1], 120.0)
+        y, _ = trace(cost, band=(lo, hi))
+        self.assertTrue(bool(np.all((y >= 60) & (y <= 120))))
+        with self.assertRaises(ValueError):
+            trace(cost, band=(np.zeros(img.shape[1]), np.zeros(img.shape[1]) - 5))
+        with self.assertRaises(ValueError):
+            trace(cost, max_jump=0)
+        with self.assertRaises(ValueError):
+            step_cost(np.zeros(5), 1.0)
+
+
 class TestResectionGeometry(unittest.TestCase):
     """Predicting whether a view can fix a position, before searching for it."""
 
