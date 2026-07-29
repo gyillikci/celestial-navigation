@@ -777,3 +777,78 @@ axis, which are the parts that decide whether a viewpoint is usable.
 `calibrated_sigma_deg` supplies the remaining piece: the per-observation sigma
 inflated by sqrt(n / n_eff), for the correlated residual that survives after the
 common mode has been taken out.
+
+
+## Lake Tahoe from a laptop screen: a null result, and the parameter that caused it
+
+A photograph of a MacBook Pro displaying the stock Lake Tahoe wallpaper.  The
+scene is unambiguous — rounded granite boulders in turquoise shallows, a lone
+Jeffrey pine on a rock point, a snow-covered range 15–30 km off across deep
+water: the Nevada east shore looking west at the Sierra crest.  Rough position
+taken as Sand Harbor, 39.198 N 119.931 W, lake surface 1897 m.
+
+**Two projections had to be separated first.**  The wallpaper is already a
+perspective image; photographing the laptop off-axis applies a second, unrelated
+homography on top.  Fitting lines to the four display edges and intersecting them
+gave a **4.9% horizontal keystone**, which uncorrected stretches the azimuth
+scale by 4.9% across the frame — 0.9° on a 19° field, kilometres of position at
+20 km.  The bezel is a known rectangle, so that one comes out exactly.
+
+Extraction then went cleanly: **1800 columns** of crest, once the threshold was
+raised to 45 (the real snow/rock edge gives ~90 units of colour departure; the
+sky's own nonlinear gradient gives ~14, and at the default the left half of the
+frame locked onto the gradient instead of the mountains).
+
+**And the search failed.**  Top ten fits after a two-stage search over the whole
+shoreline:
+
+| rms | position | azimuth | field |
+|---|---|---|---|
+| 2.09′ | 39.345 N 120.070 W | 247° | 15.2° |
+| 2.13′ | 39.228 N 120.070 W | 300° | 15.2° |
+| 2.16′ | 39.074 N 120.149 W | 254° | 15.2° |
+| 2.19′ | 39.345 N 120.072 W | 294° | 16.4° |
+
+Positions scattered over ~30 km of shore, azimuths from 247° to 313°, residuals
+all within 0.25′ of each other, and the fitted scale pinned against its bound in
+almost every row.  That is not a fix with poor precision; it is no fix at all.
+
+### The cause: an unknown focal length is a *third* nuisance parameter
+
+`resection_geometry` knew about two — a compass bias absorbing lateral motion,
+a pitch bias absorbing radial motion.  This image has a third and worse one.  The
+wallpaper is a **crop of unknown extent**, so the pixels-per-degree is unknown,
+and every measured angle therefore carries an unknown common scale.
+
+Moving the camera toward the terrain scales all apparent angles up together —
+which is *precisely* what shortening the focal length does.  The two are
+degenerate to first order.  Demonstrated directly by moving the camera along the
+sight line and refitting:
+
+| camera moved | rms | fitted scale |
+|---|---|---|
+| 0 km | 2.04′ | 298 px/deg |
+| 4 km | 1.92′ | 298 px/deg |
+| **8 km** | **1.92′** | 298 px/deg |
+
+Eight kilometres, 0.1 arcmin.  The range information is not degraded, it is
+absent.
+
+`focal_absorbed_radial` and `position_dilution(..., focal_free=True)` now
+quantify it.  On this scene:
+
+| | across | along |
+|---|---|---|
+| focal length known | 0.03 km | 0.56 km |
+| focal length unknown | 0.03 km | **2.92 km** |
+
+and the real search is worse still, because the residual floor here is dominated
+by systematics (a screen photograph carries moiré, the LCD's own pixel grid and
+an off-axis colour cast) rather than by the geometry.
+
+**The lesson generalises beyond wallpapers.**  Any image without EXIF — a crop, a
+screenshot, a frame lifted from video, a stock photograph — has lost its scale,
+and with it most of its range information.  Lateral position survives; radial
+position does not.  Denver worked despite being a stock photograph only because
+the *near* landmark supplied an angle that a common scale cannot fake.  Tahoe
+had no near landmark, and nothing to replace it.

@@ -1885,6 +1885,29 @@ class TestResectionGeometry(unittest.TestCase):
         self.assertGreater(with_near["lateral_absorbed"],
                            10 * far_only["lateral_absorbed"])
 
+    def test_unknown_focal_length_is_a_third_nuisance_parameter(self):
+        """An unknown pixels-per-degree is degenerate with radial position.
+
+        Moving the camera toward the terrain scales every apparent angle up
+        together, which is exactly what shortening the focal length does.  So a
+        cropped image, a screenshot or a stock photograph -- anything without
+        EXIF -- loses most of its range information before the search begins.
+
+        Measured on the Lake Tahoe wallpaper: with the scale free, moving the
+        camera EIGHT KILOMETRES changed the skyline residual by 0.1 arcmin.  The
+        module has to say so, or `verdict` will promise a fix that the data
+        cannot deliver.
+        """
+        from imu_fusion.resection_geometry import (position_dilution,
+                                                   focal_absorbed_radial)
+        tahoe = [(19.9, 2545), (18.2, 2610), (27.1, 2610), (27.7, 2624),
+                 (28.9, 2760), (26.6, 2755), (27.6, 2814)]
+        known = position_dilution(tahoe, 2.33 / 60, 1899.0, focal_free=False)
+        unknown = position_dilution(tahoe, 2.33 / 60, 1899.0, focal_free=True)
+        self.assertGreater(unknown["along_km"], 4.0 * known["along_km"])
+        self.assertAlmostEqual(unknown["across_km"], known["across_km"], places=6)
+        self.assertGreater(focal_absorbed_radial(tahoe, 1899.0), 0.0)
+
     def test_circle_of_position_reproduces_its_own_angle(self):
         """Every returned point must actually see the requested angle.
 

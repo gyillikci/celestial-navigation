@@ -128,8 +128,41 @@ def sensitivity(features, eye_m, k=K_REFRACTION):
         radial_ratio=(float(rad_s.max()) / rad_abs) if rad_abs > 0 else float("inf"))
 
 
+def focal_absorbed_radial(features, eye_m, k=K_REFRACTION):
+    ''' Radial sensitivity that survives an UNKNOWN FOCAL LENGTH, deg/km.
+
+        A third nuisance parameter, and the most destructive of the three.  If
+        the pixels-per-degree is not known -- a cropped image, a screenshot, a
+        stock photograph, anything without EXIF -- then every measured angle
+        carries an unknown common scale.  Moving the camera toward the terrain
+        scales all the apparent angles up together, which is *precisely* what
+        reducing the focal length does, so the two are degenerate to first order
+        and only the departure from proportionality survives.
+
+        Measured on the Lake Tahoe wallpaper: with the focal length free, moving
+        the camera EIGHT KILOMETRES changed the skyline residual by 0.1 arcmin
+        while the fitted scale simply rescaled to compensate.  Position was not
+        merely imprecise, it was absent.
+
+        Computed as the residual of regressing each feature's d(elevation)/
+        d(range) against its elevation -- the component a common scale cannot
+        explain.
+    '''
+    feats = [(float(d), float(h)) for d, h in features]
+    if len(feats) < 3:
+        return 0.0
+    e = np.array([elevation_angle_deg(d, h, eye_m, k) for d, h in feats])
+    r = np.array([elevation_angle_deg(d - 0.5, h, eye_m, k)
+                  - elevation_angle_deg(d + 0.5, h, eye_m, k) for d, h in feats])
+    denom = float(e @ e)
+    if denom <= 0:
+        return 0.0
+    lam = float(r @ e) / denom          # best common scale
+    return float(np.std(r - lam * e))
+
+
 def position_dilution(features, sigma_deg, eye_m, k=K_REFRACTION,
-                      biases_free=True):
+                      biases_free=True, focal_free=False):
     ''' Expected 1-sigma position error, km, from a given angular accuracy.
 
         `sigma_deg` is the accuracy of the MATCH, not of a pixel -- on real
@@ -141,12 +174,22 @@ def position_dilution(features, sigma_deg, eye_m, k=K_REFRACTION,
         used; set it False to see what a perfectly calibrated compass and
         horizon would buy.
 
+        `focal_free=True` additionally admits that the pixels-per-degree is
+        unknown -- a crop, a screenshot, a stock photograph.  Do not skip this
+        when it applies: an unknown scale is degenerate with radial position and
+        it is far more damaging than either bias.
+
         Returns semi-axes in km and their ratio -- an ellipse much longer than
         it is wide means a LINE of position, and one line is not a fix.
     '''
     s = sensitivity(features, eye_m, k=k)
     lat = s["lateral_absorbed"] if biases_free else s["lateral_raw"]
     rad = s["radial_absorbed"] if biases_free else s["radial_raw"]
+    if focal_free:
+        # An unknown pixels-per-degree scales every angle together, which is what
+        # a radial move does -- so only the non-proportional part is left.
+        rad = min(rad, focal_absorbed_radial(features, eye_m, k=k))
+        s = dict(s, radial_focal_free=rad)
     across = sigma_deg / lat if lat > 0 else float("inf")
     along = sigma_deg / rad if rad > 0 else float("inf")
     return dict(across_km=across, along_km=along,
