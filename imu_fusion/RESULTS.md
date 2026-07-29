@@ -418,3 +418,88 @@ duplicate rows are byte-identical, so `astro._dedupe_almanacs` drops the extras
 at import and reports what it dropped.
 
 ![Moon match](results/fig_moon_match.png)
+
+
+## A field test with a real instrument app: the terrain as an attitude reference
+
+Four Theodolite frames from a moving car on the Asian side of Istanbul
+(40.9412 N, 29.2119 E, ~177 m, 29 July 13:02:53–13:02:57 local, 8× zoom, looking
+south across the Sea of Marmara). Each frame burns in its own GPS position,
+altitude, true azimuth, roll and pitch, so the picture carries its own ground
+truth. The car was doing ~82 km/h on a bearing of 210°, which moves the site 92 m
+across the four frames and the distant ridge by under 0.06° — negligible.
+
+**The site checks out.** SRTM against the app's own GPS altitude:
+
+| frame | Theodolite | SRTM | diff |
+|---|---|---|---|
+| 13:02:53 | 176.8 m | 176.6 m | +0.2 m |
+| 13:02:55 | 175.9 m | 175.6 m | +0.3 m |
+| 13:02:56 | 173.7 m | 172.0 m | +1.7 m |
+| 13:02:57 | 172.8 m | 169.8 m | +3.0 m |
+
+**What is on that horizon.** Uludağ, 2524 m, 96.2 km away at azimuth 179.9°,
+standing +1.02° above horizontal; in front of it the Samanlı ridge at 42–44 km,
+600–850 m, +0.4 to +0.7°. The whole visible skyline is terrain 40–100 km off.
+
+**The camera's field of view, solved from the terrain.** Fitting each frame
+independently gave pixels-per-degree from 184 to 418 — the ridge is too smooth
+over a narrow field to pin four parameters from one frame. The zoom did not
+change between frames, so that one parameter is *shared*; the joint fit gives
+**276 px/deg, a 9.5° horizontal field**, which matches an 8× zoom on the main
+camera (≈200 mm equivalent) computed independently from the optics. Sharing the
+parameter that is physically shared is what broke the degeneracy.
+
+### Result 1 — the app's pitch is 1.5° out, and the terrain says so
+
+With azimuth held inside the ±0.5° its whole-degree readout allows, and roll held
+at the app's reading, the only freedom left is the elevation offset:
+
+| frame | pitch readout | elevation from terrain | bias |
+|---|---|---|---|
+| 13:02:53 | −0.6° | +0.76° | **+1.36°** |
+| 13:02:55 | −0.8° | +0.58° | **+1.38°** |
+| 13:02:56 | −0.8° | +0.94° | **+1.74°** |
+| 13:02:57 | −1.1° | +0.42° | **+1.52°** |
+
+**Pitch bias +1.50° ± 0.17°** over four independent frames. On a celestial
+altitude that is 90 arcminutes — **90 nautical miles** of position error, and it
+would be invisible without an external reference.
+
+Refraction cannot explain it: the curvature-and-refraction drop at 43 km is
+0.17°, and hiding 1.5° would need an effective Earth radius of 736 km. The
+candidates are an uncalibrated device-to-camera alignment (Theodolite ships a CAL
+function for exactly this) or the optical axis not sitting at the centre of the
+saved frame. **These four frames cannot separate those two** — both are constant
+offsets — but they measure the total, which is what a navigator actually needs.
+
+This is the study's core premise, measured rather than assumed: a phone's
+synthetic horizon carries a bias of order a degree, and a known distant skyline
+recovers it.
+
+![Theodolite pitch bias](results/fig_theodolite_pitch.png)
+
+### Result 2 — but the position is NOT recoverable here, and the reason is general
+
+Letting azimuth run free over a 100° search, the best match for the 13:02:56
+frame is **197.7°** against a truth of 178.0° — **19.7° wrong**, and with a
+*lower* residual (14.1 px) than the truth achieves. The fit is not broken; the
+information is not there:
+
+* an 8× zoom sees **9.5°** of azimuth;
+* across that window the SRTM horizon has **0.52°** of relief, against **5.98°**
+  available across the full 120° sector;
+* the correlation between observed and predicted profile SHAPE is 0.49 and 0.60
+  in two frames and 0.02 and −0.14 in the other two. Half the frames recognise no
+  terrain pattern at all.
+
+So the +1.50° bias above rests on the ridge's *height*, not on a pattern match —
+an offset measurement, which is all that was claimed, but worth being explicit
+about.
+
+The general lesson contradicts the intuition that a longer lens helps. For
+terrain resection **field of view beats angular resolution**: the earlier Bodrum
+work succeeded on a wide panorama with kilometres of relief, and this fails on a
+sharper picture of a flatter horizon. A narrow field is the wrong instrument no
+matter how good the DEM is. Zoom in to measure an angle; zoom out to fix a
+position.
