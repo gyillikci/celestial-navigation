@@ -555,6 +555,18 @@ def horizon_line(rows, quantile=0.80, iters=12, tol_px=4.0):
         Returns (slope_px_per_col, intercept_px, mask) where `mask` marks the
         columns lying within `tol_px` of the fitted line.
 
+        ROLL SIGN.  To feed `image_ray_angles` the roll that FLATTENS this
+        horizon, use
+
+            roll_deg = degrees(atan(slope))          # NOT atan(-slope)
+
+        and `roll_from_horizon` below does exactly that.  Getting it backwards
+        does not look like a sign error, it looks like a lens: the elevation of
+        the extracted horizon then ramps LINEARLY across the frame, and on a real
+        ultrawide that was a 34 arcmin swing (-19.2 at the left edge to +14.5 at
+        the right) which reads as barrel distortion.  Fixing the sign took the
+        sea-horizon scatter from 14.43 arcmin to 2.26.
+
         CHECK THE RESULT BEFORE TRUSTING IT.  A line can be fitted to any
         envelope; that does not make it a horizon.  The honest test is whether
         the flat stretches of the boundary are COLLINEAR.  On the frame above
@@ -576,6 +588,42 @@ def horizon_line(rows, quantile=0.80, iters=12, tol_px=4.0):
         coef = np.polyfit(cols[keep], r[keep], 1)
     resid = r - np.polyval(coef, cols)
     return float(coef[0]), float(coef[1]), good & (np.abs(resid) < float(tol_px))
+
+
+def roll_from_horizon(slope_px_per_col):
+    ''' Roll, in degrees, that flattens a horizon of this image slope.
+
+        Pair with `horizon_line`; the result goes straight into
+        `image_ray_angles(..., roll_deg=...)`.  Exists so the sign is written
+        once, in one place, instead of being re-derived at each call site.
+    '''
+    return math.degrees(math.atan(float(slope_px_per_col)))
+
+
+def visibility_limit_km(extinction_km=25.0):
+    ''' Range past which terrain is present in the DEM but absent from the photo.
+
+        A skyline render answers "what is GEOMETRICALLY visible" -- it marches
+        until the earth curves away.  A photograph answers "what is
+        ATMOSPHERICALLY visible", and on a hazy day those differ by a lot.
+
+        Measured on an Istanbul ultrawide: the render put the Samanli mountains
+        on the far shore of the Marmara -- 680 m at 39.5 km -- into the skyline
+        at +50 arcmin, correctly, because a 680 m peak clears a 5 m eye's horizon
+        out to 100 km.  The photograph shows nothing there but sea, so the
+        extractor traced the water horizon and every one of those samples became
+        a 50 arcmin error.  Capping `d_max_km` at 25 took the residual from 32.8
+        arcmin to 20.0; the answer was FLAT for caps between 12 and 30 km, which
+        says the far shore was the whole of it.
+
+        There is no way to read the day's visibility off the DEM, so this is a
+        judgement the caller has to make.  Two rules that help:
+
+          * cap `d_max_km` at the visibility, not at the geometric horizon;
+          * if the residual is insensitive to the cap over a wide band, the cap
+            is not the thing limiting you -- as here between 12 and 30 km.
+    '''
+    return float(extinction_km)
 
 
 # --------------------------------------------------------------------------- #

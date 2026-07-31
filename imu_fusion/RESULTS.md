@@ -1787,3 +1787,88 @@ frame shows is the price of admission: at ±53° the delivered image must be
 **calibrated**, not assumed rectilinear, and the sea horizon must be *verified
 collinear* before it is allowed to fix pitch. Both are cheap on-device checks
 that the telephoto never needed.
+
+---
+
+## The same lens, with its EXIF: 359 m — and three things I had wrong
+
+Two more frames arrived, `000039` and its Theodolite screenshot `000040`, and
+unlike IMG_7846 they carry **full EXIF**:
+
+| | |
+|---|---|
+| lens | iPhone 17 Pro back triple camera **2.22 mm f/2.2** (the ultrawide) |
+| 35 mm equivalent | **14 mm** — not the 13 mm I had assumed |
+| heading | 212.131° T |
+| GPS | 40.906222 N, 29.139447 E, alt 2.50 m |
+| taken | 11:46:33, **32 s before** frame 000063 |
+
+The Theodolite overlay adds a stated attitude: roll **−0.7°**, elevation
+**+3.10°**, heading 212° S32W, and "0.5×".
+
+**First: 14 mm explains three runs of railing.** For the 5712×4284 IMG_7846 the
+correct focal length at 14 mm is **2310 px**, not the 2145 I used. My searches
+railed their focal grids at 2274, then 2231, then 2360. The data had been telling
+me the focal length for three consecutive runs and I kept capping it.
+
+**Second: the render was showing terrain the camera could not see.** Along az
+180° the ray-march was hitting the **Samanlı mountains on the far shore of the
+Marmara — 680 m at 39.5 km** — and putting them in the skyline at +50′. That is
+*correct*: a 680 m peak clears a 5 m eye's horizon out to 100 km. But the
+photograph shows nothing there except sea, because at 40 km on a hazy summer day
+they are gone, so the extractor traced the water horizon and every one of those
+samples became a 50′ error.
+
+A skyline render answers *what is geometrically visible*. A photograph answers
+*what is atmospherically visible*. I had never distinguished them. Capping
+`d_max_km` at 25 km took the residual from **32.8′ to 20.0′**, and the answer is
+**flat for caps between 12 and 30 km** — which says the far shore was the whole
+of it. `visibility_limit_km` now documents the trap.
+
+**Third: a roll sign, disguised as a lens.** De-rolling needs `atan(+slope)`; I
+had written `atan(−slope)`. The symptom is not what a sign error usually looks
+like — the extracted sea horizon's elevation **ramped linearly across the frame,
+−19.2′ at the left edge to +14.5′ at the right, a 34′ swing** — and on a 102°
+field that reads exactly like barrel distortion. I had spent a whole prior
+session concluding "the lens must be calibrated" partly on this evidence. Fixing
+the sign took the sea-horizon scatter from **14.43′ to 2.26′**. `roll_from_horizon`
+now writes the sign once, in one place, with a test that fails on the wrong one.
+
+### The fix
+
+| step (all measured on this frame) | rms at the GPS estimate |
+|---|---|
+| EXIF f = 14 mm, `d_max` 45 km | 32.8′ |
+| + visibility cap at 25 km | 20.0′ |
+| + roll sign corrected | 14.5′ |
+| + compass prior from the telephoto frames | **10.2′** |
+
+This frame has what IMG_7846 lacked: a **genuine sea horizon**, 43% of columns
+within 4 px of one line and its three flat stretches collinear to under 3 px. So
+pitch is *measured*: **+3.279°** from the horizon against Theodolite's stated
+**+3.10°** — 0.18°, two independent routes. Roll comes out −0.189° against a
+stated −0.7°; same sign, and the horizon-derived value is the one the data
+supports.
+
+Searching 1492 coastal candidates with GPS used **only to centre the box**, and
+the compass offset held to the +0.0…+2.5° the three telephoto frames measured 30
+seconds later:
+
+**40.90302 N, 29.14005 E — 359 m from the GPS estimate**, rms 10.18′,
+separation **1.68×**, top-10 median 299 m, all ten within 100–500 m.
+
+That separation matters more than the distance. Every earlier ultrawide run sat
+at 1.00–1.02×, a flat surface where the ranking was noise. 1.68× is a real
+minimum. Left unconstrained the search preferred a cell 650 m out at 7.62′ with
+a **+7.4°** compass offset — a better residual bought with an implausible
+magnetometer error, which is the same nuisance-absorption failure this project
+keeps rediscovering.
+
+![ultrawide solved](results/fig_ultrawide_solved.png)
+
+**What this says about IMG_7846.** Same breakwater, same scene, so it very likely
+*is* from here — but it carries no EXIF at all, and it has no usable horizon
+(three plateaus, not collinear). With f wrong by 7.7%, the far shore included,
+and the roll sign inverted, it never had a chance. I am not re-litigating it
+here; the honest statement is that the frame is under-determined, not that the
+site is wrong.

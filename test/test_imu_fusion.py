@@ -2079,6 +2079,34 @@ class TestResectionGeometry(unittest.TestCase):
             keep = (r > np.percentile(r[keep], 25) - 6) & (r < np.percentile(r, 55))
         self.assertGreater(abs(np.polyval(c, 300.0) - 400.0), 20.0)
 
+    def test_roll_from_horizon_flattens_the_horizon(self):
+        """The sign that cost a day.  De-rolling needs atan(+slope); atan(-slope)
+        makes the extracted horizon's elevation ramp LINEARLY across the frame,
+        which on a 102 deg field is a 34 arcmin swing that reads as barrel
+        distortion rather than as a sign error."""
+        import numpy as np
+        from imu_fusion.resection_geometry import (horizon_line, roll_from_horizon,
+                                                   image_ray_angles)
+        f, W = 1631.0, 4032
+        xc = (W - 1) / 2.0
+        for true_roll in (-0.8, -0.19, 0.0, 0.5):
+            az = np.radians(np.linspace(-50.0, 50.0, W))
+            xi, yi = f * np.tan(az), np.zeros(W)
+            cr, sr = np.cos(np.radians(true_roll)), np.sin(np.radians(true_roll))
+            xr, yr = xi * cr - yi * sr, xi * sr + yi * cr
+            ok = np.abs(xr) < xc
+            rows = np.interp(np.arange(W) - xc, xr[ok], yr[ok])
+            slope, _, _ = horizon_line(rows + 1600.0)
+            roll = roll_from_horizon(slope)
+            self.assertAlmostEqual(roll, true_roll, delta=0.02)
+            _, el = image_ray_angles(np.arange(W) - xc, rows, f, roll_deg=roll)
+            self.assertLess(float(el.std()) * 60.0, 0.5)     # arcmin
+            # the wrong sign doubles the tilt instead of removing it
+            _, bad = image_ray_angles(np.arange(W) - xc, rows, f, roll_deg=-roll)
+            if abs(true_roll) > 0.1:
+                self.assertGreater(float(bad.std()) * 60.0,
+                                   4.0 * float(el.std()) * 60.0 + 1.0)
+
     def test_horizon_line_recovers_roll(self):
         """A rolled horizon is still a straight line; its slope IS the roll."""
         import numpy as np
