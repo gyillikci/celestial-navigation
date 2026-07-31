@@ -1872,3 +1872,82 @@ keeps rediscovering.
 and the roll sign inverted, it never had a chance. I am not re-litigating it
 here; the honest statement is that the frame is under-determined, not that the
 site is wrong.
+
+---
+
+## Visibility as a physical constraint, not a tuned number
+
+Capping `d_max_km` at 25 km fixed the Samanlı problem, but a hand-tuned distance
+is not a model — it is a number that happened to work once. `visibility.py`
+replaces it with the actual physics.
+
+**Koschmieder.** A dark object against the horizon sky has apparent contrast
+`C = C₀·exp(−τ)` and is detectable while `C > ε`. The meteorological convention
+`ε = 0.02` is exactly what *defines* the visual range `V`: `σV = ln(1/0.02) =
+3.912`. So a sea-level target vanishes at precisely `V`, which the unit test
+asserts rather than approximates.
+
+**Why a flat cap cannot work.** Aerosol is concentrated near the ground — scale
+height ~1.2 km, against ~8 km for molecular scattering — so a sight line that
+*climbs* to a summit accumulates far less optical depth than one running
+horizontally through the murk. At the same range a summit and a sea-level islet
+are not equally visible, and one `d_max` cannot tell them apart:
+
+| target height | detection range at V = 25 km |
+|---|---|
+| 0 m (sea) | 25.1 km |
+| 169 m (Büyükada) | 26.9 km |
+| 680 m (Samanlı) | 32.8 km |
+| 1200 m | 39.6 km |
+
+`render_skyline(..., visibility_km=...)` integrates the extinction along each
+ray's real slant path and drops samples below threshold. Where an azimuth has
+*nothing* detectable, the profile falls back to the water horizon rather than to
+garbage — masked with `−inf`, not 0, because terrain below the observer
+legitimately has negative elevation angles.
+
+**It reproduces the tuned cap without the tuning:**
+
+| forward model | rms at the GPS estimate |
+|---|---|
+| pure geometry, `d_max` 45 km | 24.6′ |
+| hand-tuned hard cap, `d_max` 25 km | 14.5′ |
+| Koschmieder slant, V = 12 km | 14.5′ |
+| Koschmieder slant, V = 20 km | 14.5′ |
+| Koschmieder slant, V = 25 km | 14.5′ |
+| Koschmieder slant, V = 30 km | 18.2′ |
+| Koschmieder slant, V = 40 km | 25.7′ |
+
+Flat from 12 to 25 km, degrading above 30 — and that upper edge is *independently*
+predicted. `visibility_from_bracket` reads the day's visibility off the picture
+itself, from what it does and does not show: Büyükada (169 m at 6.6 km) sharply
+present, the Samanlı mountains (680 m at 39.5 km) absent, gives **V ∈ [6.1,
+30.1] km**. The residual scan and the seen/unseen bracket agree on the ceiling
+without sharing any machinery.
+
+**And the full solve is unchanged.** Re-running the 1492-candidate search with
+`visibility_km=20` in place of `d_max_km=25` returns the same answer row for row
+— **40.90302 N, 29.14005 E, 359 m from the GPS estimate, rms 10.18′, separation
+1.68×, top-10 median 299 m**. The tuned constant is gone and nothing was lost
+with it, which is the only result that justifies replacing a number that worked
+with a model.
+
+It costs about 3× the render time (an `exp` over the whole azimuth×range grid),
+so the hard cap remains the right choice inside a hot search loop once the
+visibility is known — use the model to *find* the cap, then cap.
+
+**Honest limits**, stated in the module. This is a grey, single-scattering,
+horizontally homogeneous atmosphere. It says nothing about sea fog on one bearing
+and clear air on the next, nothing about the strong wavelength dependence of
+aerosol scattering (a red channel sees notably further than a blue one, which the
+extractor could exploit and does not), and nothing about terrain that is *bright*
+against the sky rather than dark. Its job is narrower: stop a forward model from
+asserting mountains the camera never recorded.
+
+**The general lesson.** Three of the four traps now documented in
+`render_skyline` are the same mistake in different clothing — the render answers
+a question the photograph did not ask. Bathymetry (the camera sees the water
+surface, not the sea floor), the coastline smear (SRTM's 30 m posting invents
+land at the water's edge), and now visibility (geometric horizon ≠ atmospheric
+horizon). A forward model has to reproduce the *measurement process*, not just
+the terrain.

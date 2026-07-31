@@ -1943,6 +1943,97 @@ class TestWaterLevelClamp(unittest.TestCase):
         self.assertTrue(bool(np.allclose(on, off)))
 
 
+class TestVisibility(unittest.TestCase):
+    """What the camera can see, against what the DEM says is there."""
+
+    def test_visual_range_is_where_a_sea_level_target_disappears(self):
+        """That is the DEFINITION of meteorological visual range, so a
+        sea-level target must vanish at exactly V and the model must reproduce
+        it rather than approximate it."""
+        from imu_fusion.visibility import detection_range_km, contrast
+        for v in (5.0, 12.0, 25.0, 40.0):
+            self.assertAlmostEqual(detection_range_km(v, 0.0, 0.0), v, delta=0.05 * v)
+            self.assertAlmostEqual(float(contrast(v, 0.0, 0.0, v)), 0.02, delta=0.002)
+
+    def test_summits_punch_through_haze_that_hides_the_sea(self):
+        """The reason a flat d_max cap is not enough.  Aerosol sits near the
+        ground, so a sight line that CLIMBS accumulates less optical depth: at
+        the same range a summit is visible where a sea-level islet is not."""
+        from imu_fusion.visibility import detection_range_km, is_detectable
+        v = 25.0
+        r_sea = detection_range_km(v, 5.0, 0.0)
+        r_peak = detection_range_km(v, 5.0, 680.0)
+        self.assertGreater(r_peak, r_sea * 1.25)
+        # the case that motivated this: 680 m at 39.5 km, invisible at V=25
+        self.assertFalse(bool(is_detectable(39.5, 5.0, 680.0, 25.0)))
+        # ...but a clear day would show it
+        self.assertTrue(bool(is_detectable(39.5, 5.0, 680.0, 60.0)))
+
+    def test_optical_depth_reduces_to_the_horizontal_case(self):
+        """The slant formula must not blow up as the height change goes to zero."""
+        import numpy as np
+        from imu_fusion.visibility import (slant_optical_depth, extinction_per_km,
+                                           AEROSOL_SCALE_HEIGHT_M)
+        v, d, h = 20.0, 10.0, 5.0
+        flat = extinction_per_km(v) * d * np.exp(-h / AEROSOL_SCALE_HEIGHT_M)
+        for dh in (0.0, 1e-9, 1e-4):
+            got = float(slant_optical_depth(d, h, h + dh, v))
+            self.assertAlmostEqual(got, float(flat), places=6)
+
+    def test_bracket_from_what_the_photo_does_and_does_not_show(self):
+        """The only after-the-fact visibility measurement is the picture itself."""
+        from imu_fusion.visibility import visibility_from_bracket
+        lo, hi = visibility_from_bracket(6.6, 169.0, 39.5, 680.0, eye_m=5.0)
+        self.assertLess(lo, hi)
+        self.assertLess(lo, 12.0)          # Buyukada is easy
+        self.assertGreater(hi, 20.0)
+        self.assertLess(hi, 45.0)          # the far shore really was absent
+
+    def test_render_drops_terrain_the_camera_could_not_have_seen(self):
+        """The forward-model bug this exists to prevent: a 680 m peak at 39.5 km
+        clears a 5 m eye's horizon (so the geometry puts it in the skyline) but
+        is gone in haze, and the photograph shows sea there instead."""
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline
+
+        class _FarPeak:
+            """Sea everywhere except a tall ridge at ~0.35 deg of latitude."""
+            def elevation(self, lat, lon):
+                lat = np.asarray(lat)
+                return np.where(np.abs(lat - (40.0 - 0.3553)) < 0.02, 680.0, 0.0)
+
+        kw = dict(az_start=179.0, az_end=181.0, az_step=1.0, d_min_km=1.0,
+                  d_max_km=60.0, d_step_km=0.1, water_level_m=0.0)
+        _, geo = render_skyline(_FarPeak(), 40.0, 29.0, 5.0, **kw)
+        _, hazy = render_skyline(_FarPeak(), 40.0, 29.0, 5.0,
+                                 visibility_km=20.0, **kw)
+        _, clear = render_skyline(_FarPeak(), 40.0, 29.0, 5.0,
+                                  visibility_km=80.0, **kw)
+        self.assertGreater(float(geo.max()) * 60.0, 30.0)      # geometry sees it
+        self.assertGreater(float(clear.max()) * 60.0, 30.0)    # a clear day sees it
+        self.assertLess(float(hazy.max()) * 60.0, 0.0)         # haze does not
+        # and with nothing detectable the sky is the WATER horizon, not garbage
+        from math import degrees, sqrt
+        from imu_fusion.landfall import K_REFRACTION, effective_radius_km
+        dip = degrees(sqrt(2 * 5.0 / 1000.0 / effective_radius_km(K_REFRACTION)))
+        self.assertAlmostEqual(float(hazy.max()), -dip, places=6)
+
+    def test_visibility_is_opt_in(self):
+        """None keeps the pure-geometry behaviour every existing caller relies on."""
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline
+
+        class _Hill:
+            def elevation(self, lat, lon):
+                return np.full(np.shape(lat), 300.0)
+
+        kw = dict(az_start=0.0, az_end=10.0, az_step=5.0, d_min_km=1.0,
+                  d_max_km=30.0, d_step_km=0.2)
+        _, a = render_skyline(_Hill(), 40.0, 29.0, 5.0, **kw)
+        _, b = render_skyline(_Hill(), 40.0, 29.0, 5.0, visibility_km=None, **kw)
+        self.assertTrue(bool(np.allclose(a, b)))
+
+
 class TestSkylineDP(unittest.TestCase):
     """Continuity-constrained boundary tracing, against per-column decisions."""
 

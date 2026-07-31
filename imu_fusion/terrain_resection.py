@@ -200,12 +200,22 @@ class SyntheticDem:
 # Skyline rendering
 # --------------------------------------------------------------------------- #
 
+
+def _dip_deg(eye_above_water_m, k=K_REFRACTION):
+    ''' Depression of the sea horizon for an eye this far above the surface. '''
+    h = max(float(eye_above_water_m), 0.0)
+    return degrees(sqrt(2.0 * h / 1000.0 / effective_radius_km(k)))
+
+
 def render_skyline(dem, lat: float, lon: float, cam_height_m: float,
                    az_start: float = 0.0, az_end: float = 360.0,
                    az_step: float = 0.05, d_min_km: float = 0.10,
                    d_max_km: float = 45.0, d_step_km: float = 0.05,
                    k: float = K_REFRACTION, water_level_m: float = None,
-                   clamp_water_horizon: bool = True):
+                   clamp_water_horizon: bool = True,
+                   visibility_km: float = None,
+                   scale_height_m: float = None,
+                   contrast_threshold: float = None):
     ''' Horizon elevation angle (degrees) versus azimuth, as seen from
         (lat, lon) at `cam_height_m` above sea level.
 
@@ -254,6 +264,25 @@ def render_skyline(dem, lat: float, lon: float, cam_height_m: float,
 
         The clamp only acts when `water_level_m` is set and the camera is above
         it, so land-only callers are unaffected; pass False to disable.
+
+        `visibility_km` is the FOURTH trap and the one that cost the most.  This
+        function answers "what is GEOMETRICALLY visible" -- it marches until the
+        earth curves away.  A photograph answers "what is ATMOSPHERICALLY
+        visible".  Measured on the Istanbul ultrawide: the render placed the
+        Samanli mountains on the far shore of the Marmara, 680 m at 39.5 km, in
+        the skyline at +50 arcmin, correctly, because such a peak clears a 5 m
+        eye's horizon out to 100 km.  The photograph shows only sea there, so the
+        extractor traced the water horizon and every one of those samples entered
+        the fit as a 50 arcmin error.  The residual was 32.8 arcmin and NO
+        position could lower it, because the fault was in the forward model.
+
+        Passing a visual range applies Koschmieder extinction along the actual
+        SLANT path (see `visibility.py`), so terrain whose apparent contrast falls
+        below `contrast_threshold` is excluded from the horizon.  A flat `d_max`
+        cap cannot do this: aerosol sits near the ground, so a summit and a
+        sea-level islet at the same range are not equally visible.  Leaving it
+        None keeps the pure-geometry behaviour, which is right for a synthetic
+        study and wrong for a photograph.
     '''
     azs = np.arange(az_start, az_end, az_step)
     ds = np.arange(d_min_km, d_max_km, d_step_km)
@@ -265,7 +294,24 @@ def render_skyline(dem, lat: float, lon: float, cam_height_m: float,
         H = np.maximum(H, float(water_level_m))
     alpha = np.degrees((H - cam_height_m) / 1000.0 / D
                        - D / (2.0 * effective_radius_km(k)))
+    if visibility_km is not None:
+        from .visibility import (is_detectable, AEROSOL_SCALE_HEIGHT_M,
+                                 CONTRAST_THRESHOLD)
+        seen = is_detectable(
+            D, cam_height_m, H, visibility_km,
+            scale_height_m=(AEROSOL_SCALE_HEIGHT_M if scale_height_m is None
+                            else scale_height_m),
+            threshold=(CONTRAST_THRESHOLD if contrast_threshold is None
+                       else contrast_threshold))
+        # -inf, not 0: an invisible sample must never win the max, and terrain
+        # below the observer legitimately has negative elevation angles.
+        alpha = np.where(seen, alpha, -np.inf)
     profile = alpha.max(axis=1)
+    if visibility_km is not None:
+        # an azimuth with NOTHING detectable still has a sky: the water horizon
+        # if we know the water level, otherwise the geometric horizon.
+        profile = np.where(np.isfinite(profile), profile, -_dip_deg(
+            cam_height_m - (0.0 if water_level_m is None else float(water_level_m)), k))
     if water_level_m is not None and clamp_water_horizon:
         eye = cam_height_m - float(water_level_m)
         if eye > 0.0:
