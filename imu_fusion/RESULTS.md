@@ -1539,3 +1539,61 @@ pinned by anything, because a single distant dome looks the same from a few
 hundred metres either way along the shore.  **≈600 m is the honest figure for
 this scene**, and improving it needs a second landmark at a different bearing,
 not a finer grid.
+
+### Three frames, and the parameter that cannot be observed
+
+The single-frame solve stalled at ~600 m because one smooth dome constrains range
+well and bearing poorly.  The three frames (bearings 233.9°, 238.3°, 244.3°,
+spanning 10.5°) were taken from the same spot within 3.5 s, so they share a
+position — and Heybeliada at ~5.4 km against Burgazada at ~6.9 km gives the
+near/far range pair that Denver needed.
+
+Each frame keeps its **own** compass offset, since that offset was measured
+drifting +0.00 → +1.00 → +2.50° across them.  Three progressively tighter
+parameterisations of that nuisance:
+
+| | rank-1 | top-10 median | top-10 max | separation | rms |
+|---|---|---|---|---|---|
+| single frame (067) | 626 m | 665 m | 931 m | 1.53× | 1.38′ |
+| joint, 3 free offsets (±3°) | **133 m** | 585 m | 1333 m | **1.03×** | 6.16′ |
+| joint, offsets tied to one drift `a + b·t` | 250 m | **233 m** | **600 m** | 1.29× | 5.22′ |
+
+**Read the median, not the rank-1.**  The free-offset solve's 133 m was luck —
+its top ten reached 1333 m at indistinguishable scores (separation 1.03×, i.e.
+flat).  Tying the three offsets to a single linear drift removed one parameter
+and collapsed the whole candidate set onto the truth: median 665 → 233 m, worst
+case 1333 → 600 m, separation back to 1.29×, **and rms improved**.  A model with
+*less* freedom fitting *better* is the signature of a correct constraint.
+
+**Then the diagnostic that matters.**  The drift intercept `a` railed at the +2°
+bound, so the bound was shaping the answer.  Widening it to ±6° gave:
+
+| `a` searched over | rank-1 | rms | separation | recovered offsets |
+|---|---|---|---|---|
+| [−1, +2] | **250 m** | 5.22′ | 1.29× | +2.00, +2.70, +4.26 |
+| [−3, +6] | 582 m | **2.59′** | **1.71×** | +5.75, +6.07, +6.79 |
+| *known-position fit* | — | — | — | *+0.00, +1.00, +2.50* |
+
+It railed again, at +5.75.  And note the trap: **rms improved and separation
+improved while the position got worse.**  The wider search bought a better fit by
+adopting a ~6° compass error — which a phone magnetometer does not have — and
+paid for it by sliding the position 580 m along-shore, while the recovered drift
+rate fell from 0.65 to 0.30°/s, away from the 0.72°/s measured independently.
+
+So, for this scene:
+
+- **the drift RATE is observable** — 0.65°/s recovered against ~0.72°/s measured,
+  and independently corroborated by the frame-065 held-out prediction;
+- **the absolute compass offset is NOT** — it is degenerate with lateral position
+  and will rail against whatever bound it is given.
+
+The defensible number is therefore **≈150–250 m with a realistic ±2–3°
+magnetometer prior, degrading to ≈580 m unbounded**.  The prior is not a tuning
+knob here, it is load-bearing physics.
+
+**And the sharpest warning in this whole study:** residual and separation *both*
+moved the right way while the answer moved the wrong way.  Neither metric can
+police a degenerate parameter — only an external bound on the parameter itself
+can.  Beating 150 m needs a landmark with genuine bearing diversity; all three
+frames look at the same 20° arc, so nothing in them separates "the camera moved
+along-shore" from "the compass reads high".
