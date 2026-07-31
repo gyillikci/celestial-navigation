@@ -2466,3 +2466,38 @@ any internet photograph dropped into the session gets the blind treatment — th
 Denver stock-photo solve earlier in this project is the precedent.
 
 ![zermatt demo](results/fig_zermatt_demo.png)
+
+---
+
+## TH000027: the west bearing — a NOT-A-FIX with an unresolved scale question
+
+A new 8× frame due **west** (269° S89W, 11:43:50, three minutes before the
+other morning frames), supplied as a Theodolite **screen export** (2622×1206)
+rather than a camera Original. HUD widgets and a foreground tree masked out;
+assumed pixel scale: preview fills the display width with the full tele field
+(f ≈ 15 150 px at 2622 wide).
+
+Result: the solver runs away to 4.6 km SW at rms 3.46′, separation **1.15×**,
+focal railed at the grid top, coarse rank #22 — while the *GPS cell scores
+18.9′*, 5.45× worse than the runaway. That is not the familiar shallow valley
+(where truth and winner score alike); the forward model genuinely disagrees
+with this photo at the true position. The overlay pair shows it: at the GPS
+cell the DEM's two-hump prediction has the wrong widths and the wrong
+right-hand slope; at the impostor cell the shape fits but the geography is
+wrong.
+
+Candidate causes, unresolved in order of suspicion: (1) the **screen-export
+pixel scale** is an assumption, not a measurement — if the preview crops or
+letterboxes, f is wrong by tens of percent, and the railed focal hints at
+exactly that; (2) a **compass error beyond the +4° window** on a frame taken
+right after a large slew (magnetometer lag during slews is documented on the
+Bodrum pan); (3) missing model terrain west of the site. The single-frame 8×
+was already known to be degenerate at this site; this frame adds the lesson
+that **screen exports are not measurement-grade inputs** — the pixel-to-angle
+map is app-defined, not EXIF-defined.
+
+Verdict: NOT A FIX, cause not fully diagnosed. The clean test would be the
+camera **Original** of this same moment (4032×3024 with true EXIF focal), which
+pins the scale and removes suspicion (1) entirely.
+
+![TH27 pair](results/fig_th27_pair.png)
