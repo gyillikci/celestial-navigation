@@ -2408,3 +2408,25 @@ now documented here.
   phone app (lens, frame count, attitude needed for a target CEP);
   differential canopy correction as the first model improvement aimed at the
   sub-200 m regime.
+
+---
+
+## The crest gallery: every lens, one picture each
+
+`fig_crest_gallery.png` overlays the extracted skyline (green) on the SRTM
+crest projected from each frame's solved position (red), using the exact
+inverse projection from `synthetic_scene.pixels_from_angles`:
+
+| panel | residual | what to look at |
+|---|---|---|
+| 8× 200 mm, 000067 | **2.3′** | near-coincident curves; the project's cleanest match |
+| 4× 100 mm, 000053 | 5.5′ | red rides *under* the tree canopy on the dome — the differential-canopy error, visible |
+| UW 14 mm, 000039 | 11.0′ | four island groups and the flat sea horizon in one span |
+| main 24 mm, 000083 (in-car) | 31.6′ | the visible drift between green and red IS the windscreen+haze floor |
+| 2× 48 mm, 000075 (no GPS) | 12.9′ | matches over the hill; disagrees at the quarry scar and the occluding cypresses |
+
+The gallery makes the error budget visible: where red sits systematically below
+green on treed crests, that is SRTM half-seeing the canopy — the exact
+differential bias the synthetic matrix isolated as the sub-200 m blocker.
+
+![crest gallery](results/fig_crest_gallery.png)
