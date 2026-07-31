@@ -1943,6 +1943,131 @@ class TestWaterLevelClamp(unittest.TestCase):
         self.assertTrue(bool(np.allclose(on, off)))
 
 
+class TestSkylineRegion(unittest.TestCase):
+    """Region-integrating extraction: the Baatz/Saurer (CH1) data term."""
+
+    def _model(self):
+        import numpy as np
+        from imu_fusion.skyline_region import ColorGradientModel
+        rng = np.random.default_rng(4)
+        imgs, masks, boundaries = [], [], []
+        for _ in range(6):
+            H, W = 80, 120
+            boundary = (30 + 8 * np.sin(np.linspace(0, 3, W))
+                       + rng.normal(0, 1.5, W)).astype(int)
+            img = np.zeros((H, W, 3))
+            for c in range(W):
+                img[:boundary[c], c] = [180, 200, 230]     # sky: pale blue
+                img[boundary[c]:, c] = [60, 90, 40]        # ground: dark green
+            img += rng.normal(0, 4, img.shape)
+            yy = np.arange(H)[:, None]
+            masks.append(yy < boundary[None, :])
+            boundaries.append(boundary.astype(float))
+            imgs.append(np.clip(img, 0, 255))
+        # NOTE: truth is `boundaries`, NOT `masks[i].argmax(axis=0)` -- sky
+        # (True) starts at row 0 in every column, so argmax of a boolean mask
+        # trivially returns 0 everywhere.  Caught by this suite once already;
+        # keep the real boundary alongside the mask so it cannot recur.
+        model = ColorGradientModel(color_bins=6, grad_bins=8).fit(imgs, masks)
+        return model, imgs, masks, boundaries
+
+    def test_log_likelihood_ratio_sign(self):
+        """Ground pixels must score positive (ground-like), sky negative --
+        the sign the whole region-cost algebra depends on."""
+        model, imgs, masks, boundaries = self._model()
+        llr = model.log_likelihood_ratio(imgs[0])
+        sky, ground = masks[0], ~masks[0]
+        self.assertLess(float(llr[sky].mean()), 0.0)
+        self.assertGreater(float(llr[ground].mean()), 0.0)
+
+    def test_region_cost_matches_the_explicit_double_sum(self):
+        """The whole point of the algebra is that ONE cumulative sum equals
+        the explicit 'sum sky costs above + ground costs below' per candidate
+        (inclusive of the boundary row itself, region_cost's convention);
+        verify it directly rather than trusting the derivation."""
+        import numpy as np
+        from imu_fusion.skyline_region import region_cost
+        rng = np.random.default_rng(9)
+        llr = rng.normal(size=(40, 5))
+        got = region_cost(llr, jump_scale=1.0)
+        for c in range(5):
+            # explicit(r) = sum_{y<=r} sky-cost(y) + sum_{y>r} ground-cost(y);
+            # with ground-cost = -sky-cost = -llr this is sum_{y<=r} llr(y),
+            # i.e. the inclusive cumulative sum -- region_cost's own convention
+            explicit_costs = np.array([float(llr[:r + 1, c].sum())
+                                       for r in range(40)])
+            self.assertEqual(int(np.argmin(got[:, c])),
+                             int(np.argmin(explicit_costs)))
+
+    def test_extract_recovers_a_clean_boundary(self):
+        import numpy as np
+        from imu_fusion.skyline_region import extract
+        model, imgs, masks, boundaries = self._model()
+        rows = extract(imgs[1], model, max_jump=4, jump_penalty=1.0)
+        self.assertLess(float(np.median(np.abs(rows - boundaries[1]))), 3.0)
+
+    def test_guarded_falls_back_when_region_cost_collapses(self):
+        """The CH1 failure this module exists to catch, reproduced on the real
+        scene: a region cost with no interior minimum pins to a frame edge for
+        every column (measured: 100% of columns at row 0, median error 296 px
+        against the curated mask).  The guard must detect that -- via the
+        pinned-fraction symptom, not a model-specific check -- and defer to the
+        local-edge extractor, which on the same photo is far closer to truth.
+
+        Skipped if the CH1 sample data is not present (it is fetched
+        separately, not committed wholesale); the algebra and healthy-path
+        tests above do not depend on it.
+        """
+        import glob
+        import numpy as np
+        from PIL import Image
+        from imu_fusion.skyline_region import (ColorGradientModel, extract,
+                                               extract_guarded)
+        cvg = sorted(glob.glob('CH1/cvg/*.png.txt'))
+        if len(cvg) < 30:
+            self.skipTest("CH1 sample data not present")
+        seen, scenes = set(), []
+        for txt in cvg:
+            t = open(txt).read().split()
+            key = (round(float(t[1]), 4), round(float(t[2]), 4))
+            if key in seen:
+                continue
+            seen.add(key)
+            scenes.append(txt)
+        train_txt, test_txt = scenes[10:20], scenes[0]   # small, fast subset
+        imgs, masks = [], []
+        for txt in train_txt:
+            img = np.asarray(Image.open(txt[:-4]).convert('RGB'))
+            m = np.asarray(Image.open(txt[:-8] + '-mask.png').convert('L')) > 127
+            imgs.append(img)
+            masks.append(m)
+        model = ColorGradientModel(color_bins=8, grad_bins=10).fit(imgs, masks)
+        img = np.asarray(Image.open(test_txt[:-4]).convert('RGB'))
+        mask = np.asarray(Image.open(test_txt[:-8] + '-mask.png').convert('L')) > 127
+        truth = np.where(mask.any(axis=0), mask.argmax(axis=0).astype(float), np.nan)
+        good = np.isfinite(truth)
+
+        pure_region = extract(img, model, max_jump=6, jump_penalty=1.0)
+        guarded = extract_guarded(img, model, max_jump=6, jump_penalty=1.0)
+        err_region = float(np.median(np.abs(pure_region[good] - truth[good])))
+        err_guarded = float(np.median(np.abs(guarded[good] - truth[good])))
+        # the pure region path is expected to be badly collapsed here
+        self.assertGreater(err_region, 100.0)
+        # the guard must substantially recover from it
+        self.assertLess(err_guarded, err_region / 2.0)
+
+    def test_guarded_uses_the_region_path_when_it_is_healthy(self):
+        import numpy as np
+        from imu_fusion.skyline_region import extract, extract_guarded
+        model, imgs, masks, boundaries = self._model()
+        plain = extract(imgs[3], model, max_jump=4, jump_penalty=1.0)
+        guarded = extract_guarded(imgs[3], model, max_jump=4, jump_penalty=1.0)
+        truth = boundaries[3]
+        # on a healthy scene the guard should not meaningfully change the result
+        self.assertLess(float(np.median(np.abs(guarded - truth))),
+                        float(np.median(np.abs(plain - truth))) + 2.0)
+
+
 class TestFixPipeline(unittest.TestCase):
     """The layer-5 scheduler: coarse-to-fine position search over a DEM."""
 

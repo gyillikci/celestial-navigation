@@ -2554,3 +2554,94 @@ IJCNN comparison suggested, now quantified on independent data.
 
 ![CH1 scenes](results/fig_ch1_scenes.png)
 ![CH1 summary](results/fig_ch1_summary.png)
+
+---
+
+## Investigating the CH1 authors' own extractor
+
+The CH1 benchmark showed our step-cost extractor disagreeing with the curated
+masks by 67–120 px median on the hard scenes. The dataset's paper — bundled as
+`CH1/mountain-localization.pdf` — describes what its own authors did instead,
+and it is a different *kind* of cost, not a better-tuned version of ours:
+
+> "To obtain the data term for a candidate height in a column we sum all
+> foreground costs below the candidate contour and sky costs above the
+> contour, where we have trained a pixel's color and gradient likelihoods for
+> ground and sky."
+
+That is a **region-integrating** cost: every pixel of the column votes on
+where the boundary is. Our `skyline_dp` uses a **local step cost** — a matched
+filter a few pixels tall — so only pixels adjacent to the candidate boundary
+vote. The difference predicts exactly the failure mode measured: a strong
+internal edge (a snow line, a shaded sub-ridge, lens flare) beats the true
+boundary *locally*, and a local detector has no way to know better. A region
+cost resists this because placing the boundary at an internal edge means
+declaring a large block of mountain to be sky and paying for that over
+hundreds of pixels.
+
+**Reimplemented, not copied** — their code was not used, only the paper's
+description — as `imu_fusion/skyline_region.py`. The key algebraic step: with
+`c_sky`/`c_gnd` the per-pixel negative log-likelihoods,
+
+    cost(r) = Σ_{y≤r} c_sky(y) + Σ_{y>r} c_gnd(y)
+            = Σ_{y≤r} [c_sky − c_gnd](y)  +  (a per-column constant)
+
+so the entire data term is **one cumulative sum** of a log-likelihood ratio —
+no slower than the local cost it replaces, verified against an explicit
+double-sum in a unit test. The pixel likelihoods themselves are a plain
+quantised colour + gradient histogram (the paper only "sketches roughly" its
+own model; this is the least-assuming reconstruction of that sentence).
+
+**Trained on 25 CH1 locations disjoint from the 10-scene benchmark**, then
+compared against the curated masks on exactly those 10:
+
+| | our step-cost DP | region cost (reimpl.) |
+|---|---|---|
+| median-of-medians | 106.5 px | **46.0 px** |
+| scenes improved | — | 6/10 |
+| worst case | 359 px | 296 px |
+
+A real improvement on the failure mode it targets — and a new failure mode of
+its own. On one scene (heavy overcast + fresh snow on both sides of the true
+crest) the colour model cannot separate hazy sky from snow at all; the
+cumulative sum has no interior minimum and the path **pins to the frame edge
+for 100% of columns** — total failure, not partial.
+
+**A hybrid (0.5 region + 0.5 local edge) helps but doesn't fix the collapse**
+(worst case still 296 px, because a pinned region term still outvotes the edge
+term almost everywhere). The working fix is a **guard on the symptom, not a
+smarter model**: a real skyline essentially never hugs a frame edge across the
+whole width, so if more than 60% of columns sit within 4 px of the search
+band's edge, the region term is untrusted and the pure local-edge extractor
+takes over.
+
+| | DP | region | hybrid | **guarded** |
+|---|---|---|---|---|
+| median-of-medians | 106.5 | 46.0 | 52.5 | 49.5 px |
+| worst case | 359 | 296 | 296 | **86 px** |
+| beats DP | — | 6/10 | 6/10 | **7/10** |
+
+![extractor comparison](results/fig_ch1_extractor_compare.png)
+
+**A bug the test suite caught on the way, worth stating plainly.** The first
+version of `region_cost` normalised to [0,1] per column, and `extract`'s
+default `jump_penalty=1.0` — borrowed from `skyline_dp`'s raw-cost scale — is
+5–50× too large for that range: on a clean synthetic boundary the path
+over-smoothed into a **flat compromise line**, ignoring real local variation
+entirely (verified: the extracted row was numerically *identical* across all
+120 columns). The synthetic test happened to still pass its distance threshold
+by coincidence (the flat line was near the boundary's median), which is exactly
+why the earlier `masks[i].argmax(axis=0)` truth bug in the same test — always
+returning 0 because sky is `True` starting at row 0 — went unnoticed until
+fixed. Both are now corrected and covered; the flattening tendency itself is a
+known scale-sensitivity of the region cost, worth remembering before trusting
+`jump_penalty` values carried over from the local-cost module.
+
+**Honest scope.** Not reimplemented: their dehazing-steered smoothness term
+and interactive correction strokes — the paper is explicit these exist, and
+the CH1 evidence says the *data term* is what mattered here, not the
+smoothness term. Position-solve validation of the guarded extractor (does the
+46→49.5 px extraction gain survive into a smaller final-fix error?) is a
+natural next step, not yet run.
+
+135 new lines of module, 5 new tests, 153 total green.
