@@ -2501,3 +2501,17 @@ camera **Original** of this same moment (4032×3024 with true EXIF focal), which
 pins the scale and removes suspicion (1) entirely.
 
 ![TH27 pair](results/fig_th27_pair.png)
+
+**TH000027 addendum — the export scale is measured, and the verdict sharpens.**
+The 000039/000040 Original+export pair from the same instant measures the
+Theodolite export mapping directly: free-fit scale **1.5400** vs fill-width's
+1.5378 — agreement to 0.14%, residual 2.4 px. **Fill-width confirmed; the scale
+suspect is eliminated**, and the calibration is reusable for every TH export.
+With scale pinned and the heading window opened for slew lag (−2…+12°), the
+solve still runs to the SW shore at separation **1.01×** while the GPS cell
+holds ~8′ — so the honest refinement of "with the Original you'd have solved
+it" is: *probably not alone*. No single 8× frame in this project ever fixed
+(000063/65/67 needed three frames plus a drift model); the Original would have
+given clean pixels, not more bearing. This frame's real value is as a fourth
+azimuth (269°) in the joint solve, and ~8′ of residual at truth — trees on
+Kınalıada, screen-JPEG artifacts, HUD contamination — is its noise floor.
