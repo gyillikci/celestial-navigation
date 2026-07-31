@@ -2051,3 +2051,65 @@ truth, the truth is not a grid point, so heading legitimately trades ~2.3° per
 cell of lateral offset and focal one step per cell of radial offset — the exact
 degeneracies `sensitivity` and `focal_absorbed_radial` compute. The assertions
 were loosened to one grid step; the code was right.
+
+---
+
+## The in-car test: good geometry, contaminated measurement, and a verdict that refuses to bluff
+
+Two evening frames, `000083` + Theodolite `000084`: **1× main camera** (24 mm
+equiv, f = 2796 px, 71.6° field), GPS **39.113572 N 27.699714 E, alt 168 m** —
+inland, near Akhisar — heading 169.109 T, 19:12, shot **through the windscreen
+of a moving car** in dusk haze, wind turbines on the ridge. Per instruction, GPS
+was used only as a rough box centre.
+
+This frame exercised every untested path in `fix_pipeline` at once: **pitch
+free** (no sea horizon → the collinearity gate can't pass), **inland DEM** (new
+tiles fetched for E026–E028), a compass with no drift history, and one new
+capability — `eye_agl_m`, the **above-ground eye mode**, because an inland
+observer's render height must vary with each candidate's ground (the coastal
+absolute-eye trick doesn't exist here). Added with a test that pins the AGL
+arithmetic and proves equivalence with absolute mode on zero ground.
+
+**What happened, in order:**
+
+- First solve (slack ±6°): winner 632 m from GPS but **separation 1.00×** and
+  the heading **railed at −6°**. Both red flags up.
+- Roll sweep at the GPS cell: exonerated (gains 0.8′; the Theodolite overlay's
+  near-zero roll was right).
+- Wide heading scan: the car's compass is **~10° off** (best 159.0 vs EXIF
+  169.1) — unsurprising inside a steel body — but the valley bottom is *broad
+  and shallow*, rms ~31.6′ at best.
+- Re-solve with the measured compass window (−14…−4): the winner **ran away to
+  5.1 km** by railing at the *new* edge (−14°) to buy 4′ of rms, with the
+  GPS-adjacent cluster (283–721 m, headings 155–161, an *interior* minimum)
+  sitting at ranks 4–10. Separation 1.17×. This is the textbook
+  nuisance-absorption failure — the same one the coastal solve's gate defeated —
+  except here no measured drift history exists to justify a tighter gate.
+
+**The part worth keeping: the geometry was never the problem.** The layer-3
+check (run late; it should have been run first) gives skyline ranges 4.2–13.7 km
+— a 3.3× spread — and absorbed sensitivities of **9.6 deg/km lateral, 1.5
+radial**, roughly **14× better than the Istanbul islands**. At a *clean* 30′
+residual this scene would fix to ~50 m across, ~330 m along. The residual is not
+clean: it carries ±40′ of *correlated structure* (−37′ at the left edge, +32′
+centre-left) that no position, heading, roll or focal in the search could
+remove. Windscreen refraction (oblique, raked glass across a 71° field), dusk
+haze against SRTM's bare-earth crests, and a moving platform are the physical
+suspects; none of them is in the forward model.
+
+**Verdict: NOT A FIX — and that is the correct output.** The pipeline's own
+numbers said so: separation 1.00–1.17× against the 1.68× of the coastal solve,
+and a railed heading in both windows. The honest statement is that the
+candidate field is *consistent* with the GPS position at the few-hundred-metre
+level (the GPS-adjacent cluster holds interior-minimum headings), but the frame
+cannot *prove* a position independently. A pipeline that returned "632 m" here
+without the separation number would have been lying by omission.
+
+![in-car test](results/fig_incar_test.png)
+
+**Lessons folded back:** (1) `eye_agl_m` is now a first-class mode; (2) run the
+layer-3 feasibility check *before* the search, as the architecture says — it
+was the last thing run here and it reframed the whole failure; (3) a shot
+through glass needs either a windscreen term in the model or a "don't" in the
+capture guidance. The phone app controls its capture conditions; a handheld
+shot out of the window would likely have dropped the floor substantially.

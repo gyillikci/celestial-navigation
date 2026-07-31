@@ -70,6 +70,12 @@ class SkylineObservation:
     pitch_deg: float = None            # fixed pitch, degrees
     horizon_row: float = None          # sea-horizon row at cx -> pitch measured
     eye_above_water_m: float = 2.0
+    eye_agl_m: float = None            # set for an INLAND observer: camera is
+                                       # this far above the LOCAL GROUND, so the
+                                       # render height varies per candidate.
+                                       # Coastal solves keep the absolute eye --
+                                       # fixing it absolutely (not ground+2) is
+                                       # what took the telephoto from 250->188 m
     k: float = K_REFRACTION
 
     def __post_init__(self):
@@ -84,6 +90,12 @@ class SkylineObservation:
         if self.horizon_row is not None:
             return "measured"
         return "free" if self.pitch_deg is None else "fixed"
+
+    def cam_height_m(self, ground_m):
+        ''' Camera height above the DEM datum at a candidate on this ground. '''
+        if self.eye_agl_m is not None:
+            return float(ground_m) + float(self.eye_agl_m)
+        return float(self.eye_above_water_m)
 
     def dip_deg(self):
         h = max(float(self.eye_above_water_m), 0.0)
@@ -200,15 +212,17 @@ def _render_window(obs: SkylineObservation, prior: SearchPrior, margin_deg=2.0):
 
 
 def score_candidate(dem, lat, lon, obs: SkylineObservation, prior: SearchPrior,
-                    grid: RenderGrid, az_window):
+                    grid: RenderGrid, az_window, ground_m=None):
     ''' Render once, then sweep every (heading, focal) hypothesis against it.
 
         Returns (rms_deg, heading_deg, focal_factor).  A free pitch is
         eliminated as the per-hypothesis residual mean -- closed form, so it
-        never appears as a grid axis.
+        never appears as a grid axis.  `ground_m` feeds the AGL eye mode; the
+        absolute mode ignores it.
     '''
     azs, prof = render_skyline(
-        dem, lat, lon, obs.eye_above_water_m + 0.0,
+        dem, lat, lon, obs.cam_height_m(ground_m if ground_m is not None
+                                        else 0.0),
         az_start=az_window[0], az_end=az_window[1],
         az_step=grid.az_step_deg, d_min_km=grid.d_min_km,
         d_max_km=grid.d_max_km, d_step_km=grid.d_step_km,
@@ -271,8 +285,9 @@ def solve_fix(dem, obs: SkylineObservation, prior: SearchPrior,
 
     t0 = time.perf_counter()
     ranked = []
-    for i, (la, lo, _h) in enumerate(cells):
-        s, _hd, _f = score_candidate(dem, la, lo, obs, prior, coarse, window)
+    for i, (la, lo, hh) in enumerate(cells):
+        s, _hd, _f = score_candidate(dem, la, lo, obs, prior, coarse, window,
+                                     ground_m=hh)
         ranked.append((s, i))
         if progress and i % 200 == 0:
             progress(f"coarse {i}/{len(cells)} best "
@@ -284,8 +299,9 @@ def solve_fix(dem, obs: SkylineObservation, prior: SearchPrior,
     t0 = time.perf_counter()
     out = []
     for n, i in enumerate(survivors):
-        la, lo, _h = cells[i]
-        s, hd, f = score_candidate(dem, la, lo, obs, prior, fine, window)
+        la, lo, hh = cells[i]
+        s, hd, f = score_candidate(dem, la, lo, obs, prior, fine, window,
+                                   ground_m=hh)
         out.append((s * 60.0, la, lo, hd, f, i))
         if progress and n % 20 == 0:
             progress(f"fine {n}/{len(survivors)} best "

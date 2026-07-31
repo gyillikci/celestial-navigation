@@ -2079,6 +2079,23 @@ class TestFixPipeline(unittest.TestCase):
         # and the audit trail says the pruning was safe, not lucky
         self.assertLessEqual(pruned["coarse_rank_of_winner"], 6)
 
+    def test_agl_eye_mode(self):
+        """An inland observer stands on the LOCAL ground, so the render height
+        must vary per candidate; on zero ground the two modes must agree
+        exactly, which pins the AGL arithmetic without a second scene."""
+        from imu_fusion.fix_pipeline import solve_fix, SkylineObservation
+        import dataclasses
+        dem, obs_abs = self._observation(pitch_deg=0.0)
+        obs_agl = dataclasses.replace(obs_abs, eye_above_water_m=999.0,
+                                      eye_agl_m=self.EYE)
+        self.assertEqual(obs_agl.cam_height_m(0.0), self.EYE)
+        self.assertEqual(obs_agl.cam_height_m(150.0), 150.0 + self.EYE)
+        prior = self._prior()
+        r1 = solve_fix(dem, obs_abs, prior, fine=self._grid(), top_k=4)
+        r2 = solve_fix(dem, obs_agl, prior, fine=self._grid(), top_k=4)
+        self.assertEqual(r1["fix"], r2["fix"])       # all cells sit on 0 ground
+        self.assertAlmostEqual(r1["rms_arcmin"], r2["rms_arcmin"], places=9)
+
     def test_empty_candidate_set_is_loud(self):
         from imu_fusion.fix_pipeline import solve_fix
         dem, obs = self._observation(pitch_deg=0.0)
