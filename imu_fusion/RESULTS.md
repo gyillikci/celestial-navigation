@@ -2177,3 +2177,42 @@ Two independent in-car frames, two identical verdicts, mutually consistent
 diagnostics — the capture condition is the problem, not the frames.
 
 ![frame 000081](results/fig_f81.png)
+
+---
+
+## Frame 000053: the 4× telephoto — best single-frame fix of the project
+
+Same coastal site, 22 s after the ultrawide, ~10 s before the 8× frames: **100 mm
+equivalent, 19.6° field, f = 11 649 px**, heading 243.8° T. One frame, standard
+recipe, 7-second solve:
+
+**40.90564 N, 29.14147 E — 182 m from the GPS point**, rms **5.35′**, separation
+up to **1.37×**, coarse rank #1.
+
+That beats the ultrawide's 359 m (single frame) and matches the 8×'s 188 m —
+which needed *three* frames and a drift model. The 20° field is the sweet spot
+this project's own geometry analysis predicts: enough angular resolution to
+keep the extraction at ~1-pixel error (unlike 102°), enough field to span
+Burgazada plus the Kaşık islet plus two sea-horizon segments for bearing
+diversity (unlike 9.9°).
+
+**A roll lesson on the way.** The collinearity gate correctly FAILED (no two
+flat stretches on one line — the envelope slices through the island), so pitch
+went free. But the envelope's slope, **+1.78°**, turned out to be *genuine
+roll*, captured from the short sea segment beside the islet: forcing roll to 0
+collapsed the solve to 4.6 km at 1.06×, and bracketing roll at 1.4/1.78/2.2
+returned the *same cell* (182 m) every time, separation 1.06–1.37×. So an
+unverifiable horizon can still measure roll usefully — the position is robust to
+±0.4° of it — while pitch stays free. The compass offset came out **+3.7°**,
+larger than the 8× frames' +0.0…+2.5 ten seconds later: the handheld
+magnetometer wanders at the degree scale on this timescale, as every multi-frame
+dataset in this project has shown.
+
+| lens (35 mm equiv) | field | frames | fix error | separation |
+|---|---|---|---|---|
+| 14 mm ultrawide | 102° | 1 | 359 m | 1.68× |
+| 24 mm main (in-car) | 72° | 1 | — | 1.04–1.19× (no fix) |
+| **100 mm 4× tele** | **19.6°** | **1** | **182 m** | **1.29–1.37×** |
+| 200 mm 8× tele | 9.9° | 3 | 188 m | 1.03× (joint) |
+
+![frame 000053](results/fig_f53.png)
