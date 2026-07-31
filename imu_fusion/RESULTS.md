@@ -2216,3 +2216,40 @@ dataset in this project has shown.
 | 200 mm 8× tele | 9.9° | 3 | 188 m | 1.03× (joint) |
 
 ![frame 000053](results/fig_f53.png)
+
+---
+
+## Frame 000075: stale GPS caught, box from OSINT, estimate on the motorway
+
+The hardest input yet, because the EXIF **lies**: the frame (19:07, 48 mm equiv,
+heading 141° SE) carries the *morning Istanbul coordinates* — byte-identical to
+the coastal frames — while five minutes later the car is provably near Akhisar,
+200 km away. The Theodolite overlay explains it: **"LOCATION PERMISSION
+DENIED"** — the camera recycled a stale fix into EXIF. First lesson: a GPS tag
+can be *confidently wrong*, and the 19:07-vs-19:12 impossibility is detectable
+from the EXIF alone. Any pipeline that trusts the tag without a consistency
+check inherits the lie.
+
+**The box came from OSINT instead.** Route: İstanbul→İzmir on the O-5; the
+19:12:35 point is confirmed at 39.1136 N 27.6997 E heading 169°; dead reckoning
+5.5 min back along the corridor at motorway speed puts 19:07 near **39.195 N,
+27.651 E** (Kırkağaç–Akhisar segment). The smoke filling the frame is
+corroborated by news reports of that day's forest fire, which started ~13:10 at
+Evkafteke (Akhisar), spread toward the Soma border, and closed the İzmir–İstanbul
+motorway. A ±7 km box around the dead-reckoned centre; **no GPS used anywhere**.
+
+**Result** (2105 candidates, 18 s): **39.20849 N, 27.66841 E** — 2.1 km from
+dead reckoning, **10.9 km up-road of the 19:12 point** (5.5 min at ~118 km/h:
+self-consistent), rms **12.85′** — less than half the other in-car frames'
+floor, plausibly because the hills are near (1–4 km) and the 40° field crosses
+less oblique windscreen. But separation **1.06×**: by the project's own gate,
+NOT independently proven. The estimate stands on the *agreement of three weak
+constraints* — terrain match, dead reckoning, and the road corridor — not on
+any one of them.
+
+Verdict language matters here: this is an **estimate with corroboration**, not
+a fix. The in-car scoreboard is now three frames, separations 1.04–1.19×, and
+one consistent story: through a windscreen the terrain term supports but cannot
+carry.
+
+![frame 000075](results/fig_f75.png)
