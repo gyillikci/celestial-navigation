@@ -1,0 +1,8 @@
+942.9867
+46.2949
+7.0606
+-1
+1024
+765
+IMG_5046_01024.png
+#iphone4: assuming 35mm-equiv focal is 29.4

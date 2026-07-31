@@ -2515,3 +2515,42 @@ it" is: *probably not alone*. No single 8× frame in this project ever fixed
 given clean pixels, not more bearing. This frame's real value is as a fourth
 azimuth (269°) in the joint solve, and ~8′ of residual at truth — trees on
 Kınalıada, screen-JPEG artifacts, HUD contamination — is its noise floor.
+
+---
+
+## CH1 (Baatz/Saurer, ETH): the field's benchmark, blind
+
+The canonical dataset arrived in the repo — 196 cvg + 7 panoramio scenes, each a
+photo, a curated sky mask, and metadata (focal in pixels, ground-truth lat/lon).
+Ten distinct locations solved blind; Swiss SRTM fetched on demand (15 tiles).
+
+**Protocol, stated so the comparison is honest.** Skyline from the *dataset
+mask* (isolating the matcher from our extractor); focal from metadata; **heading
+entirely unknown → full 360° search**; roll gridded ±1.5°; pitch free; observer
+2 m above local ground; truth used only to centre a **20 × 20 km box** at 0.4 km
+cells and to score afterwards. This is *not* the paper's country-scale (40 000
+km²) search, so the numbers are not directly comparable to their 88%; it is the
+same rough-prior regime this project used on the Istanbul frames.
+
+| scenes | within 1 km | median error | best |
+|---|---|---|---|
+| 10 | **6** | **383 m** | **38 m** (×4 — the grid cell floor) |
+
+**The separation gate transfers perfectly to foreign data.** Every scene with
+separation ≥ 1.3× landed under 1 km; every failure sat at 1.05–1.18×. The
+verdict layer, tuned entirely on Istanbul coastal frames, correctly labelled 10
+out of 10 alpine scenes it had never seen — the strongest evidence yet that
+separation measures *identifiability*, not site-specific luck.
+
+**And a finding that redirects the roadmap.** Our DP extractor disagrees with
+the curated masks by **67–120 px median** on several of these scenes (against
+2–3 px on the good ones), because alpine frames have layered ridges, lens flare
+and roadside clutter that a single global path walks straight into. But the
+error-vs-disagreement panel shows **no correlation with failure**: scenes where
+our extractor was 108 px off still solved to 38 m (the mask fed the solve), and
+one scene with 3 px agreement still failed at 2.4 km. So on this data the
+*matcher* is sound and the *extractor* is the weak stage — exactly what the
+IJCNN comparison suggested, now quantified on independent data.
+
+![CH1 scenes](results/fig_ch1_scenes.png)
+![CH1 summary](results/fig_ch1_summary.png)
