@@ -2253,3 +2253,47 @@ one consistent story: through a windscreen the terrain term supports but cannot
 carry.
 
 ![frame 000075](results/fig_f75.png)
+
+---
+
+## The IJCNN 2021 SVM detector: confirmed, reproduced, and raced against ours
+
+Asked to confirm a prior claim about `TouqeerAhmad/skyline_detection` (IJCNN
+2021) and to try the detector for real. Both done — in scratch space only, per
+the repo's non-commercial licence; nothing of theirs is committed here.
+
+**Confirmed.** The "SVM" is a single **16×16 linear filter** (256 weights +
+bias, shipped in `misc/Horizon_SVM_Classifier_Baatz_CH1.mat` — the weights
+really are checked into their git). The reference computes it as a per-pixel
+Python loop; one 2D correlation is mathematically identical, verified against
+the loop to **0.000000000**. Its saved output — `1 − normalize(score)` — is a
+grayscale map with flat dark sky, embossed-relief terrain and the boundary as a
+dark crease, matching the sample image supplied in review. Runtime on a 12 MP
+frame: ~4 s single-core via FFT (the reference loop takes minutes).
+
+**Trace agreement is frame-dependent.** Feeding the negated response into our
+own continuity DP:
+
+| frame | SVM vs our extractor | then solving with each |
+|---|---|---|
+| 000039 ultrawide | mean **2.8 px**, p95 6.0 | SVM: 376 m @ 1.54× · ours: 263 m @ 1.65× |
+| 000053 4× tele | mean **18.5 px**, p95 110 | SVM: **1127 m** @ 1.20× · ours: **182 m** @ 1.29× |
+
+On the ultrawide the two extractors agree at the few-pixel level — consistent
+in kind with the previously-claimed 2.0 px Kos comparison — and produce nearly
+the same fix. On the 4× the SVM response is weak on the descending, texture-rich
+near coastline; the path through it **bridges the bay with a flat chord**, and
+that single localized error (plus the corrupted roll estimate that follows from
+it) costs **6× the position accuracy**.
+
+**Verdict.** The IJCNN filter is a genuinely good, cheap response generator —
+mobile-friendly, one correlation — and where it agrees with our step-cost
+extractor the downstream fix is the same. But the fix quality is decided at the
+*path* stage, and on hard boundaries (steep near coastlines, texture against
+water) our step-cost formulation currently wins. The natural synthesis, noted
+for the app: use the SVM response as an **additional channel inside
+`skyline_dp.step_cost`** rather than as a replacement — the licence requires
+reimplementation for shipping anyway, and a 16×16 correlation is trivial in
+Accelerate/Metal.
+
+![SVM comparison](results/fig_svm_skyline.png)
