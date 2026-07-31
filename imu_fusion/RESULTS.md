@@ -2297,3 +2297,40 @@ reimplementation for shipping anyway, and a 16×16 correlation is trivial in
 Accelerate/Metal.
 
 ![SVM comparison](results/fig_svm_skyline.png)
+
+---
+
+## More tests: the all-lens joint fix, and proof that ~200 m is a floor
+
+**Test 1 — five frames, three optics, one position.** All the morning frames at
+once: ultrawide (measured pitch), 4× (roll from the sea segment), and the three
+8× frames — each with its *own* compass window (the magnetometer wandered +1.5 /
++3.7 / +0.0…+2.5° across 35 s), but one shared position. One render per
+candidate serves every frame (the union azimuth window costs ~2× a single-frame
+render, not 5×), and the joint score is the mean of per-frame rms normalised by
+each frame's own best, so no lens's noise floor dominates.
+
+Result at the standard 135 m grid: **203 m from GPS**. Not better than the 4×
+alone (182 m) in rank-1 distance — but decisively better in *robustness*: the
+joint top-6 spans **74–409 m**, all in one basin, where every single-frame
+top-10 contained cells kilometres away. Fusion here buys impostor-immunity, not
+precision.
+
+**Test 2 — refine to 65 m cells: the floor is physics, not grid.** A 261-cell
+local pass at ~65 m spacing lands at **222 m**, with the whole top-8 between
+156 and 407 m and near-identical scores (1.33–1.43). Tripling the grid
+resolution moved the answer by one coarse cell — *nowhere closer*. This is the
+~100–300 m correlated-error floor predicted when the CEP question was answered:
+the residual is smooth in azimuth (SRTM treetops, extraction bias), smooth error
+mimics position shift, and no grid refinement can dig beneath it.
+
+**Why fusion doesn't average it down:** the five frames share the same
+systematics — the same DEM, the same treetop bias on the same islands, the same
+morning haze — so their errors are correlated *between frames*, and N frames of
+the same systematic give 1× the systematic, not 1/√N. The joint solve proves
+this empirically: per-frame rms at the joint fix (12.5′ / 5.6′ / 7.6′ / 1.9′ /
+4.5′) sits at each frame's own floor simultaneously. To get below ~200 m at
+this site the *model* must improve — a canopy-height correction on SRTM, or a
+near-field landmark — not the frame count.
+
+![joint all-lens](results/fig_joint_all.png)
