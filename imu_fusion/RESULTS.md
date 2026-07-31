@@ -1408,6 +1408,16 @@ That is the tightest terrain match in this study — Tahoe's 2.12′ came with a
    `render_skyline(..., water_level_m=0.0)` now exists for this; the parameter
    takes a lake level too (1897.0 at Tahoe) and stays opt-in, because genuine
    below-datum land exists.
+
+   **But it did not fix this scene, and saying so matters.**  Re-running frame
+   065 through the committed function measured *zero* of 1100 azimuths where
+   clamping changed the horizon: `render_skyline` takes the **max** angle along
+   each ray, and a −900 m sea floor never wins a max.  The clamp is right in
+   principle and it is what the *next* piece of work needs — waterline
+   extraction, depression angles, any code that reads heights directly instead
+   of through a max, such as the `h <= 1.0` sea test used in the Bodrum
+   coastline analysis.  It is not what made the Istanbul match work.  Trap 2
+   below did that.
 2. **SRTM smears coastlines.**  Standing at the water's edge, the ~30 m posting
    puts ~6 m of spurious "land" 300 m out along *seaward* azimuths, which the
    renderer faithfully reports as a phantom **+0.65° horizon floor at every
