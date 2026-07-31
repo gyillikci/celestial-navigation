@@ -1505,3 +1505,37 @@ Two honest limits, both visible in the table:
   while the rank-1 at 898 m bought its fit with −3.5°.  Constraining the offset
   to a real magnetometer spec (±3°) is therefore not tuning, it is refusing to
   let the search buy an unphysical compass.
+
+**Refined on a 100 m grid, compass held to ±3°** — and the refinement is more
+interesting for what it *fails* to buy:
+
+| | coarse (500 m grid, ±5°) | fine (100 m grid, ±3°) |
+|---|---|---|
+| rank-1 error | 898 m | **626 m** |
+| rms | 1.56′ | 1.38′ |
+| separation | 2.04× | **1.53×** |
+| top-10 error spread | — | 478–931 m, median 665 m |
+
+Rank-1 improves, but **separation collapses**: every candidate within ~500 m of
+another scores between 1.38′ and 1.53′.  The residual surface is *flat* at the
+100 m scale, so the earlier 898 m was not really grid-limited after all — the
+geometry simply cannot resolve position better than roughly **600 m** here, and
+a finer grid buys precision that is not in the data.  Reporting the coarse
+result as "grid-limited" was optimistic; this is the correction.
+
+The reason is the scene: one smooth island dome at 7.4 km.  A dome constrains
+range well and bearing poorly, and the free compass offset absorbs what little
+lateral signal there is.
+
+The two nuisances behave exactly as this study has always claimed, and the fine
+table shows it cleanly:
+
+- **pitch offset converges** — −0.355 to −0.431° across all ten, a spread of
+  0.08°;
+- **compass offset does not** — −3.00 to +2.00° across the same ten.
+
+Pitch is pinned by the elevation of a target at known range; bearing is not
+pinned by anything, because a single distant dome looks the same from a few
+hundred metres either way along the shore.  **≈600 m is the honest figure for
+this scene**, and improving it needs a second landmark at a different bearing,
+not a finer grid.
