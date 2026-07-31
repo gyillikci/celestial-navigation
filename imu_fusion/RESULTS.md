@@ -1754,16 +1754,32 @@ cylindrical and equidistant models against the DEM separated them by under 3′
 while all three railed `f` to the grid edge — so this is not a projection being
 identified, it is a fit collapsing the field until any DEM wiggle will do.
 
-**And the invariants say it is the wrong place.** Angular *widths* and *gaps*
-are untouched by compass offset and by pitch — those shift the pattern, they do
-not stretch it. From 40.906 N 29.139 E the DEM shows **75.8° of unbroken
-mainland** (az 140–215.8, peak 110′). The photo shows small island groups
-separated by wide open water. No focal length reconciles those.
+**A residual floor that no position can lower.** A blind search over **1115
+coastal candidates** spanning lat 40.30-41.15, lon 28.05-29.95 — every coast the
+DEM tiles cover, ~100 km across — returns rank-1 **24.1' at separation 1.02x**,
+with the top fifteen scattered from 5 km to 86 km apart and headings ranging over
+0°-334°. `f` rails to the grid edge at every one of them. That is not a search
+failing to find the right basin; it is a **model error large enough to swamp the
+signal**. The lens mapping contributes ~90' at the frame edge; terrain structure
+contributes a few arcmin. No position can be recovered underneath that.
 
-The likeliest reading is that this frame is simply **from somewhere else** — it
-carries no GPS, and its foreground is a rock breakwater unlike the earlier
-frames. A blind search over every coast the tiles cover is the only way to
-settle it, and it is reported below.
+**A claim I have to withdraw.** I first wrote that the frame is probably from
+somewhere else, on the grounds that angular widths and gaps are invariant to
+compass and pitch, and that the DEM at the claimed site shows 75.8° of unbroken
+mainland (az 140-215.8, peak 110') where the photo shows islands in open water.
+The invariance argument is sound as far as it goes — but converting the photo's
+*column* extents into *degrees* requires the mapping, and the mapping is exactly
+what is in question. So that test is **not independent** of the projection
+problem and cannot carry the conclusion.
+
+What survives is only topological, and it does not rule the site out: from
+40.906 N 29.139 E the arc 220°-320° does contain four separated land groups with
+water between them, which is the pattern the photo shows, and the central-column
+fits did keep returning a heading near 228°. The site is neither confirmed nor
+excluded. The frame is **undiagnosable until the lens is calibrated**, and saying
+more than that would be inventing a result.
+
+![ultrawide diagnosis](results/fig_ultrawide_diagnosis.png)
 
 **What survives for the phone app.** The ultrawide's 106° of bearing diversity
 under a single compass offset is still the right instrument on paper. What this
