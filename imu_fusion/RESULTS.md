@@ -2149,3 +2149,31 @@ above ~1.7× the fix is *earned* and box size is irrelevant; at ~1.0× the
 "answer" is the prior wearing a costume.
 
 ![box growth](results/fig_box_growth.png)
+
+---
+
+## Frame 000081: the second in-car frame confirms the first
+
+Taken **2 s before** 000083, ~60 m up the road (the GPS deltas say ~110 km/h).
+Same recipe. Two findings:
+
+**An extraction trap with a name.** The first DP pass pinned the left quarter of
+the boundary to the search-band *floor* — roadside trees beat the ridge crest,
+because this frame's composition differs from 000083's: a dark **near ridge**
+fills the left half. Raising the band floor above the foreground fixed it
+(rows 1413–1750, riding the crest full-width). Lesson for the app: the band is
+not a constant; it must clear the foreground *per frame*.
+
+**The verdict repeats, with better evidence.** Best fit at the GPS cell needs a
+compass offset of **−16°**; frame 000083, two seconds later in the same car,
+measured **−8°**. An 8° swing in 2 s means the in-car magnetometer is not
+biased but *unstable* — there is no window a plausibility gate can defend. The
+solve duly ran to 5.2 km at separation **1.19×**. Verdict: NOT A FIX, same as
+000083, for the same underlying reason plus one more: with heading unanchored
+and ~30–47′ of windscreen-and-haze structure in the residual, the terrain term
+cannot outvote the nuisances.
+
+Two independent in-car frames, two identical verdicts, mutually consistent
+diagnostics — the capture condition is the problem, not the frames.
+
+![frame 000081](results/fig_f81.png)
