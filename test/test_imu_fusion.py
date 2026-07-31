@@ -1943,6 +1943,150 @@ class TestWaterLevelClamp(unittest.TestCase):
         self.assertTrue(bool(np.allclose(on, off)))
 
 
+class TestFixPipeline(unittest.TestCase):
+    """The layer-5 scheduler: coarse-to-fine position search over a DEM."""
+
+    class _IslandDem:
+        """Water everywhere except Gaussian islands -- fast and analytic."""
+        ISLANDS = [(39.945, 29.985, 180.0, 0.9),      # (lat, lon, peak m, radius km)
+                   (39.955, 30.035, 120.0, 0.7),
+                   (39.935, 30.060, 90.0, 0.6)]
+
+        def elevation(self, lat, lon):
+            import numpy as np
+            lat = np.asarray(lat, dtype=float)
+            lon = np.asarray(lon, dtype=float)
+            h = np.zeros(np.broadcast(lat, lon).shape)
+            for la0, lo0, pk, rad in self.ISLANDS:
+                dkm = np.hypot((lat - la0) * 111.19,
+                               (lon - lo0) * 111.19 * 0.766)
+                h = np.maximum(h, pk * np.exp(-(dkm / rad) ** 2))
+            return h
+
+    TRUTH = (40.0, 30.0)
+    HEADING = 190.0
+    F_PX, CX, CY = 1000.0, 1023.5, 767.5
+    EYE = 5.0
+
+    def _observation(self, **kw):
+        """Synthesize the skyline this camera would record at TRUTH.
+
+        Generated at pitch 0, roll 0, where az = atan(x/f) and
+        el = atan(-y/hypot(f, x)) are EXACT, so rows invert in closed form
+        and the observation is consistent with the forward model to
+        interpolation error only.
+        """
+        import numpy as np
+        from math import degrees, sqrt
+        from imu_fusion.terrain_resection import render_skyline
+        from imu_fusion.landfall import K_REFRACTION, effective_radius_km
+        from imu_fusion.fix_pipeline import SkylineObservation
+        dem = self._IslandDem()
+        azs, prof = render_skyline(
+            dem, *self.TRUTH, self.EYE, az_start=140.0, az_end=240.0,
+            az_step=0.02, d_min_km=0.5, d_max_km=15.0, d_step_km=0.02,
+            water_level_m=0.0)
+        cols = np.arange(0.0, 2048.0, 4.0)
+        xoff = cols - self.CX
+        az_off = np.degrees(np.arctan(xoff / self.F_PX))
+        el = np.interp(self.HEADING + az_off, azs, prof)
+        rows = self.CY - np.tan(np.radians(el)) * np.hypot(self.F_PX, xoff)
+        return dem, SkylineObservation(
+            columns=cols, rows=rows, f_px=self.F_PX, cx=self.CX, cy=self.CY,
+            eye_above_water_m=self.EYE, **kw)
+
+    def _prior(self, **kw):
+        from imu_fusion.fix_pipeline import SearchPrior
+        # centre the box OFF the truth, as a real GPS rough estimate would be
+        base = dict(lat=self.TRUTH[0] + 0.008, lon=self.TRUTH[1] - 0.010,
+                    heading_deg=self.HEADING - 0.6,
+                    heading_slack_deg=(-1.0, 2.0), heading_step_deg=0.1,
+                    focal_factors=(0.98, 1.00, 1.02),
+                    box_lat_km=3.0, box_lon_km=3.0, cell_km=0.4,
+                    ground_range_m=(0.0, 10.0))
+        base.update(kw)
+        return SearchPrior(**base)
+
+    def _grid(self):
+        from imu_fusion.fix_pipeline import RenderGrid
+        return RenderGrid(az_step_deg=0.05, d_min_km=0.5, d_max_km=15.0,
+                          d_step_km=0.05, column_step=4, water_level_m=0.0)
+
+    def test_recovers_truth_with_fixed_pitch(self):
+        from imu_fusion.fix_pipeline import solve_fix, distance_km
+        dem, obs = self._observation(pitch_deg=0.0)
+        res = solve_fix(dem, obs, self._prior(), fine=self._grid(), top_k=8)
+        err_m = distance_km(*self.TRUTH, *res["fix"]) * 1000.0
+        self.assertLess(err_m, 300.0)                 # under one cell
+        # the prior box is deliberately centred OFF the truth, so the truth is
+        # not a grid point; heading legitimately trades against the winning
+        # cell's lateral offset at ~2.3 deg per 0.4 km cell at 5 km range
+        self.assertAlmostEqual(res["heading_deg"], self.HEADING, delta=2.5)
+        # likewise focal: scale is degenerate with RADIAL offset (this is
+        # `focal_absorbed_radial`'s whole subject), so with truth off-grid the
+        # winner may sit one focal step away -- but not at the far rail
+        self.assertAlmostEqual(res["focal_factor"], 1.0, delta=0.021)
+        self.assertLess(res["rms_arcmin"], 3.0)
+        self.assertGreater(res["separation"], 1.3)
+
+    def test_recovers_truth_with_free_pitch(self):
+        """Pitch eliminated as the residual mean must still localise --
+        radial information then comes only from near/far structure."""
+        from imu_fusion.fix_pipeline import solve_fix, distance_km
+        dem, obs = self._observation()                # no pitch given -> free
+        self.assertEqual(obs.pitch_mode, "free")
+        res = solve_fix(dem, obs, self._prior(), fine=self._grid(), top_k=8)
+        self.assertLess(distance_km(*self.TRUTH, *res["fix"]) * 1000.0, 600.0)
+
+    def test_measured_pitch_recomputes_per_focal_length(self):
+        """The horizon row converts to an angle THROUGH f; freezing pitch at
+        the nominal f while gridding f would decouple them."""
+        import numpy as np
+        from math import degrees, sqrt, atan
+        from imu_fusion.fix_pipeline import SkylineObservation
+        obs = SkylineObservation(
+            columns=np.arange(10.0), rows=np.full(10, 900.0),
+            f_px=self.F_PX, cx=self.CX, cy=self.CY,
+            horizon_row=900.0, eye_above_water_m=self.EYE)
+        self.assertEqual(obs.pitch_mode, "measured")
+        p1, p2 = obs.pitch_for(1000.0), obs.pitch_for(1040.0)
+        self.assertNotAlmostEqual(p1, p2, places=3)
+        expect = degrees(atan((900.0 - self.CY) / 1000.0)) - obs.dip_deg()
+        self.assertAlmostEqual(p1, expect, places=9)
+
+    def test_both_pitch_sources_is_an_error(self):
+        import numpy as np
+        from imu_fusion.fix_pipeline import SkylineObservation
+        with self.assertRaises(ValueError):
+            SkylineObservation(columns=np.arange(4.0), rows=np.arange(4.0),
+                               f_px=1000.0, cx=0.0, cy=0.0,
+                               pitch_deg=1.0, horizon_row=500.0)
+
+    def test_coarse_to_fine_matches_the_flat_search(self):
+        """The coarse pass may only reorder the pruning, never the answer:
+        pruned-to-top-k and exhaustive fine must agree on rank-1."""
+        from imu_fusion.fix_pipeline import solve_fix, coastal_candidates
+        dem, obs = self._observation(pitch_deg=0.0)
+        prior = self._prior()
+        cells = coastal_candidates(dem, prior)
+        pruned = solve_fix(dem, obs, prior, fine=self._grid(), top_k=6,
+                           cells=cells)
+        flat = solve_fix(dem, obs, prior, fine=self._grid(),
+                         top_k=len(cells), cells=cells)
+        self.assertEqual(pruned["fix"], flat["fix"])
+        self.assertAlmostEqual(pruned["rms_arcmin"], flat["rms_arcmin"],
+                               places=6)
+        # and the audit trail says the pruning was safe, not lucky
+        self.assertLessEqual(pruned["coarse_rank_of_winner"], 6)
+
+    def test_empty_candidate_set_is_loud(self):
+        from imu_fusion.fix_pipeline import solve_fix
+        dem, obs = self._observation(pitch_deg=0.0)
+        prior = self._prior(ground_range_m=(500.0, 600.0))   # nothing qualifies
+        with self.assertRaises(ValueError):
+            solve_fix(dem, obs, prior, fine=self._grid())
+
+
 class TestVisibility(unittest.TestCase):
     """What the camera can see, against what the DEM says is there."""
 

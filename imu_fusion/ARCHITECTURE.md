@@ -166,12 +166,16 @@ project's history:
 | attitude | `resection_geometry.horizon_line/roll_from_horizon/image_ray_angles` |
 | feasibility | `resection_geometry.sensitivity/position_dilution/waterline_range`, `visibility.visibility_from_bracket` |
 | forward model | `terrain_resection.render_skyline/DemTiles`, `visibility` |
-| search | (session scripts today — the scheduler is the next module to land) |
+| search | `fix_pipeline.solve_fix/SkylineObservation/SearchPrior/RenderGrid` |
 | verdict | `resection_geometry.effective_samples`, separation + MC in scripts |
 
-The one box not yet in the library is the layer-5 scheduler itself; the numbers
-above come from benchmarked session scripts, and lifting the coarse→fine loop
-into `imu_fusion/` is the obvious next commit.
+Layer 5 landed as `fix_pipeline.py`: `SkylineObservation` (three pitch modes,
+decided by the layer-1 collinearity gate — `horizon_row` recomputes pitch per
+focal length because the conversion runs through f), `SearchPrior` (GPS centres
+the box; heading slack is a constructor argument so the plausibility gate cannot
+be forgotten), `RenderGrid.coarsened()` (the benchmarked 35× pass), and
+`solve_fix`, whose result carries `coarse_rank_of_winner` so every run audits
+the pruning instead of trusting it.
 
 ## Phone mapping
 

@@ -2014,3 +2014,40 @@ which is the honest baseline and the slow one.
 page cache; the first render of a cold tile pays ~25 MB of disk read. Nothing
 here is a benchmark of the *algorithm* against published systems — only of this
 implementation.
+
+---
+
+## Layer 5 lands in the library: `fix_pipeline.py`
+
+The coarse-to-fine scheduler that existed only as session scripts is now
+`imu_fusion/fix_pipeline.py` — `SkylineObservation` (three pitch modes, chosen
+by the collinearity gate; a measured pitch recomputes **per focal length**
+because the horizon-row conversion runs through f), `SearchPrior` (GPS centres
+the box and never scores; the heading slack is a constructor argument so the
+plausibility gate cannot be forgotten), `RenderGrid.coarsened()` (the
+benchmarked 35× pass) and `solve_fix`, which reports `coarse_rank_of_winner` so
+every run audits its own pruning.
+
+**Validated against the session scripts on the real frame (000039):**
+
+| | session script (flat) | `solve_fix` (coarse→fine) |
+|---|---|---|
+| fix | 40.90302, 29.14005 | 40.90442, 29.14147 |
+| distance from GPS | 359 m | 263 m |
+| rms | 10.18′ | 10.95′ |
+| separation | 1.68× | 1.65× |
+| coarse rank of winner | — | **#3** of 1479 |
+| time | **414 s** | **26 s** (12 coarse + 14 fine) |
+
+The two fixes are 196 m apart on *different* candidate grids (0.28 km cells vs
+0.135 km) — within one script cell, i.e. the same minimum. 16× faster for the
+same answer, now with tests: six in `TestFixPipeline`, including the invariant
+that pruned-to-top-k and exhaustive-fine must agree on rank-1, and that an empty
+candidate set raises instead of returning something.
+
+Two of the new tests failed on their first run, and both failures were the
+*library documenting itself*: with the prior box deliberately centred off the
+truth, the truth is not a grid point, so heading legitimately trades ~2.3° per
+cell of lateral offset and focal one step per cell of radial offset — the exact
+degeneracies `sensitivity` and `focal_absorbed_radial` compute. The assertions
+were loosened to one grid step; the code was right.
