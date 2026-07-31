@@ -1932,9 +1932,13 @@ without sharing any machinery.
 with it, which is the only result that justifies replacing a number that worked
 with a model.
 
-It costs about 3× the render time (an `exp` over the whole azimuth×range grid),
-so the hard cap remains the right choice inside a hot search loop once the
-visibility is known — use the model to *find* the cap, then cap.
+It cost about 3× the render time in that run, and I first attributed that to the
+`exp` over the azimuth×range grid. **That attribution was wrong.** Benchmarked on
+the same grid the exp costs only **1.14×** (278.8 → 317.4 ms); the 3× came from
+having to march to `d_max` 60 km instead of 25 so the model has something to
+decide about. The fix is to cap the march at the detection range of the tallest
+terrain that could plausibly matter — 31.7 km for 1200 m at V = 20 km — which
+recovers most of the saving while keeping the model.
 
 **Honest limits**, stated in the module. This is a grey, single-scattering,
 horizontally homogeneous atmosphere. It says nothing about sea fog on one bearing
@@ -1951,3 +1955,62 @@ surface, not the sea floor), the coastline smear (SRTM's 30 m posting invents
 land at the water's edge), and now visibility (geometric horizon ≠ atmospheric
 horizon). A forward model has to reproduce the *measurement process*, not just
 the terrain.
+
+---
+
+## Compute time: where it goes, and how much of it is avoidable
+
+Measured on this container (single-threaded numpy), and it reproduces the
+session's wall clocks: 277 ms/cell × 1492 predicted **414 s** against ~430 s
+observed; the visibility run 891 ms/cell → **1330 s** against ~1370 s.
+
+**The render is everything.** Per candidate, for the 000039 search geometry:
+
+| stage | cost | share |
+|---|---|---|
+| render (DEM ray-march, 1.25 M lookups) | **273 ms** | 98.6% |
+| score (4 focal lengths × 101 headings × 504 samples) | 4 ms | 1.4% |
+
+DEM lookup runs at **4–5 M bilinear samples/s**; the scoring interpolation runs
+at **50 M/s**, so it is effectively free. Every optimisation that matters is an
+optimisation of the ray-march, and any nuisance parameter that can be evaluated
+*without* re-rendering — pitch, heading, focal length — is nearly free. That is
+why the solve grids 101 headings and 4 focal lengths without noticing, and why
+adding one more *position* candidate costs 70× more than adding one more heading.
+
+| render grid | lookups | ms |
+|---|---|---|
+| 34° span, 0.05°, 1.2–40 km @ 0.05 | 527 k | 132 |
+| 130° span, 0.05°, 1–25 km @ 0.05 | 1.25 M | 279 |
+| 130° span, 0.05°, 1–45 km @ 0.05 | 2.29 M | 557 |
+| 130° span, 0.10°, 1–25 km @ 0.15 | 208 k | 37 |
+| 360° span, 0.20°, 1–30 km @ 0.30 | 173 k | 39 |
+
+**Coarse-to-fine buys an order of magnitude, and costs nothing.** A coarse pass
+(az 0.2°, range 0.4 km, every 40th image column) runs at **7.9 ms/cell — 35×
+cheaper** — and still ranks the fine-grid winner **#3**. Refining only the top 50:
+
+| schedule | time | answer |
+|---|---|---|
+| fine pass over all 1492 cells | 414 s | rank-1 |
+| coarse all + fine top-50 | **26 s** | same rank-1 |
+| medium all + fine top-50 | 60 s | same rank-1 |
+
+**16× faster for the identical answer.** The coarse pass is not an approximation
+of the result, only of the *ranking used to prune*, and a 35× cheaper render
+still puts the winner in the top 3 of 1492.
+
+**What this implies for the phone.** A 26 s single-core fix is already
+tolerable for a deliberate "fix my position" action, and three things make it
+much better on device: the ray-march is embarrassingly parallel across
+candidates (6 performance cores, and it is pure gather+max — a natural GPU or
+Accelerate workload); the search box shrinks drastically when GPS gives a
+±100 m prior instead of ±8 km; and the literature's approach (Baatz/Saurer)
+precomputes a **skyline database** rather than rendering per query, which turns
+the whole render column into a lookup. This project ray-marches per candidate,
+which is the honest baseline and the slow one.
+
+**Caveat.** These are single-run timings on one container with warm DEM tiles in
+page cache; the first render of a cold tile pays ~25 MB of disk read. Nothing
+here is a benchmark of the *algorithm* against published systems — only of this
+implementation.
