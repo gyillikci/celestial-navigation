@@ -1467,3 +1467,41 @@ Two things follow, and both were mis-stated before the extra frames arrived:
   readout.  This is direct empirical support for the least-rotation shutter gate
   — take the shot when the phone is still, and estimate the compass offset **per
   keyframe**, which is what `terrain_factors.solve_landmark_fix` already models.
+
+### Solving the position, not just checking it
+
+Everything above used the EXIF position as an *input* and fitted only the two
+bias offsets — which measures the model, not a fix.  So: throw the position away
+and solve for it.  GPS is used only to place a generous search box and, at the
+very end, to score.
+
+Given (camera parameters, not position): heading, and the focal length from
+`FocalLengthIn35mmFilm`.  Free: latitude, longitude, compass offset, pitch
+offset.  Search box lat 40.84–40.98, lon 29.00–29.30 — a **±7 km / −15…+18 km
+dead-reckoning-grade prior** — restricted to coastal cells (0–60 m), 500 m grid.
+Frame 067, 293 skyline samples over 9.8° of Burgazada.
+
+| rank | position | rms | compass | error |
+|---|---|---|---|---|
+| **1** | 40.9100 N 29.1300 E | **1.56′** | −3.5° | **898 m** |
+| 2 | 40.9050 N 29.1350 E | 2.40′ | +2.5° | 398 m |
+| 3 | 40.9050 N 29.1450 E | 3.05′ | +5.0° | 486 m |
+| 5 | 40.9050 N 29.1400 E | 3.22′ | +3.5° | **144 m** |
+| 7 | 40.9100 N 29.1400 E | 3.51′ | +0.0° | 423 m |
+
+**898 m rank-1**, with seven of the top eight inside ~1 km and rank-5 at 144 m.
+Median over all 413 candidates is **21.32′** against a winner of 1.56′, and the
+separation beyond 2 km is 2.04× — the search discriminates, it is not flat.
+
+Two honest limits, both visible in the table:
+
+- **Grid-limited, not signal-limited.**  898 m is under two cells of a 500 m
+  grid.
+- **The compass offset scatters** — −3.5°, +2.5°, +5.0°, +3.5°, 0.0° across the
+  top five.  A free azimuth offset trades against lateral position, which is the
+  nuisance parameter eating precisely the axis it always eats, and it is why the
+  cluster smears along-shore.  Note that every candidate *near the truth* chose
+  +2.5 to +3.5°, agreeing with the +2.50° measured when the position was known,
+  while the rank-1 at 898 m bought its fit with −3.5°.  Constraining the offset
+  to a real magnetometer spec (±3°) is therefore not tuning, it is refusing to
+  let the search buy an unphysical compass.
