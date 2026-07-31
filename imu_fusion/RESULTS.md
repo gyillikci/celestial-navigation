@@ -2430,3 +2430,39 @@ green on treed crests, that is SRTM half-seeing the canopy — the exact
 differential bias the synthetic matrix isolated as the sub-200 m blocker.
 
 ![crest gallery](results/fig_crest_gallery.png)
+
+---
+
+## Hunting the world's photos: what the sandbox allows, and a Matterhorn demo
+
+Asked to pull scenes from a visual tool around the world and locate them. The
+attempt is documented because the constraint map is itself a result:
+
+**Egress policy probe.** Open: `github.com`, `raw/objects.githubusercontent`,
+`s3.amazonaws.com`, `storage.googleapis.com` (plus the search/fetch harness
+tools). Blocked: Wikimedia/Wikipedia, Flickr, Unsplash, Hugging Face, Zenodo,
+university dataset hosts (ETH, VUT Brno), and every government webcam network
+tried (FAA weather cams, NPS, USGS). So third-party photos are reachable only
+if they live *inside a public git repository*.
+
+**Four candidate repos cloned and inspected** — `LandscapeAR` (code only),
+`CrossLocate` (code only; data on the blocked VUT host), `ianare/exif-samples`
+(17 GPS-tagged photos; all street-level, no terrain skyline),
+`Alps-Webcam-Live-Scraper` (scraper only, no archived frames). No public repo
+found carrying terrain-skyline photographs with GPS truth.
+
+**What the policy does allow globally: the DEM.** The AWS `elevation-tiles`
+bucket serves SRTM for the planet, so the world tour ran as a synthesis:
+Alps tiles fetched on demand, a 28 mm scene generated on the **Gornergrat ridge
+facing the Matterhorn** (3 px correlated noise, +1° compass error, prior box
+centred 800 m off), solved blind over a 4 km ridge band:
+
+**70 m from truth, rms 5.79′, separation 4.63×, 14 s** — the strongest
+separation of any solve in this project, because Alpine relief supplies what
+the method feeds on: kilometres of range spread within one view.
+
+The practical route to the original request stands open from the *user's* side:
+any internet photograph dropped into the session gets the blind treatment — the
+Denver stock-photo solve earlier in this project is the precedent.
+
+![zermatt demo](results/fig_zermatt_demo.png)
