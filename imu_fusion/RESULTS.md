@@ -2334,3 +2334,77 @@ this site the *model* must improve — a canopy-height correction on SRTM, or a
 near-field landmark — not the frame count.
 
 ![joint all-lens](results/fig_joint_all.png)
+
+---
+
+## Synthetic scenes over real terrain: the error budget, finally isolated
+
+Real photos validated the pipeline but can never isolate anything — every frame
+carries extraction noise, compass error, canopy and haze at once, in unknown
+amounts. New `imu_fusion/synthetic_scene.py` generates the observation a camera
+*would* record from an exactly known position over a **real DEM**, with each
+error injected alone and in known quantity.
+
+**The generator is provably consistent with the solver**: `pixels_from_angles`
+is the algebraic inverse of `image_ray_angles` (round-trip 1e-6 px, tested);
+a zero-corruption scene must solve back to its own cell exactly, and does — the
+pipeline's first end-to-end identity test.
+
+**The harness's first catch came before any experiment ran.** With zero noise
+the identity initially *failed* by 1.26′: the **free-pitch mode eliminates
+pitch as a residual mean, which linearizes a rotation as an offset** — the mild
+sibling of the ultrawide's 2.15° disaster. Measured: ~1.3′ at (1.5° pitch, 40°
+field); ~20′ at (3°, 102°). Invisible under real-photo noise, now a pinned unit
+test, and the quantitative reason ultrawide frames *need* the measured-horizon
+mode.
+
+**The matrix** — four real-terrain sites × corruption conditions, truth known,
+solver blind (prior offset ~500 m and +1° compass, as a real rough prior is):
+
+| site (lens) | clean | noise 3 px | noise 6 px | canopy +10 m |
+|---|---|---|---|---|
+| Marmara UW 14 mm | 187 m @ 1.07× | 187 m | 425 m | 187 m |
+| Marmara 4× 100 mm | 187 m @ **2.61×** | 187 m @ 2.2–2.4× | 187 m @ 1.8–2.0× | 187 m @ 2.56× |
+| **Akhisar 24 mm, no windscreen** | **127 m @ 2.70×** | 127 m @ 2.2–2.3× | 127 m @ 1.8–1.9× | 127 m @ 2.70× |
+| Tahoe 24 mm | 177 m @ 1.15× | 177–414 m | 661 m | 480 m |
+
+(errors are grid-limited from below: 250 m cells, truth off-grid.)
+
+Four findings, each worth a field day:
+
+1. **The Akhisar geometry was never the problem.** The same inland scene that
+   returned separation 1.04–1.19× through a real windscreen gives **127 m at
+   2.70×** with clean optics — the strongest separation in the whole matrix.
+   The synthetic no-windscreen experiment confirms what the feasibility gate
+   claimed: the capture condition, not the terrain, killed the car frames.
+2. **The 4× sweet spot replicates synthetically** (2.61×, robust to every
+   corruption tested), independently of the real-frame result.
+3. **Uniform canopy is pitch-degenerate** — +10 m of trees on everything moved
+   the coastal fixes *not at all*, because a common elevation lift is absorbed
+   by the free pitch. Canopy hurts only where it is *differential* across
+   ranges: Tahoe degraded 177 → 480 m. So the ~200 m real-world floor is not
+   canopy *per se* but canopy *variation* — a sharper target for the model fix.
+4. **Correlated 3 px noise costs almost nothing; 6 px doubles the error** on
+   the weaker-geometry sites. The extraction quality bar is ~3 px, which the DP
+   extractor meets on clean frames.
+
+**A self-inflicted incident, recorded**: installing scipy for the SVM
+comparison silently upgraded numpy to 2.4, breaking the GTSAM wheel (requires
+numpy<2) — caught because the full suite hangs at the first factor-graph test,
+fixed by pinning numpy back to 1.26.4. The environment constraint is real and
+now documented here.
+
+### Roadmap
+
+- **A. Generator in the library** — DONE: `synthetic_scene.py`, 5 tests,
+  exact inverse projection, identity solve, CanopyDem, correlated noise.
+- **B. Error models** — DONE for noise/compass/focal/canopy; visibility
+  truncation plumbed but unexercised.
+- **C. Matrix over real DEM** — first 28-solve pass DONE (table above). Next:
+  finer grids so errors are not floor-limited at 250 m; CEP curves vs noise
+  level per lens; differential-canopy sweeps.
+- **D. Next** — rendered-texture images (test *extraction*, not just solving);
+  promote matrix cases to regression tests; derive capture guidance for the
+  phone app (lens, frame count, attitude needed for a target CEP);
+  differential canopy correction as the first model improvement aimed at the
+  sub-200 m regime.

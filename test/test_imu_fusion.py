@@ -2104,6 +2104,102 @@ class TestFixPipeline(unittest.TestCase):
             solve_fix(dem, obs, prior, fine=self._grid())
 
 
+class TestSyntheticScene(unittest.TestCase):
+    """The generator must be exactly consistent with the solver's model."""
+
+    def test_pixels_from_angles_inverts_image_ray_angles(self):
+        import numpy as np
+        from imu_fusion.resection_geometry import image_ray_angles
+        from imu_fusion.synthetic_scene import pixels_from_angles
+        rng = np.random.default_rng(5)
+        for f, pitch, roll in ((1631.0, 3.2, -0.7), (2796.0, -1.5, 1.8),
+                               (11649.0, 0.9, 0.2)):
+            x = rng.uniform(-1900, 1900, 300)
+            y = rng.uniform(-1400, 1400, 300)
+            az, el = image_ray_angles(x, y, f, pitch_deg=pitch, roll_deg=roll)
+            xr, yr, ok = pixels_from_angles(az, el, f, pitch_deg=pitch,
+                                            roll_deg=roll)
+            self.assertTrue(bool(ok.all()))
+            self.assertLess(float(np.abs(xr - x).max()), 1e-6)
+            self.assertLess(float(np.abs(yr - y).max()), 1e-6)
+
+    def test_zero_noise_scene_solves_to_its_own_cell(self):
+        """The end-to-end identity: generate at a cell centre with no
+        corruption, solve, land on that exact cell with a tiny residual."""
+        import numpy as np
+        from imu_fusion.fix_pipeline import (SearchPrior, RenderGrid, solve_fix,
+                                             coastal_candidates, distance_km)
+        from imu_fusion.synthetic_scene import SceneSpec, observation_from_scene
+        dem = TestFixPipeline._IslandDem()
+        spec = SceneSpec(lat=40.0, lon=30.0, heading_deg=190.0, f35_mm=48.0,
+                         pitch_deg=1.5, roll_deg=0.8, eye_above_water_m=5.0,
+                         d_min_km=0.5, d_max_km=15.0)
+        obs = observation_from_scene(dem, spec, pitch_known=True)
+        prior = SearchPrior(lat=40.004, lon=29.995, heading_deg=189.6,
+                            heading_slack_deg=(-1.5, 2.5), heading_step_deg=0.1,
+                            focal_factors=(0.99, 1.00, 1.01),
+                            box_lat_km=2.5, box_lon_km=2.5, cell_km=0.4,
+                            ground_range_m=(0.0, 10.0))
+        grid = RenderGrid(az_step_deg=0.05, d_min_km=0.5, d_max_km=15.0,
+                          d_step_km=0.05, column_step=6, water_level_m=0.0)
+        # the identity claim requires the truth to BE a candidate: append it
+        cells = coastal_candidates(dem, prior) + [(spec.lat, spec.lon, 0.0)]
+        res = solve_fix(dem, obs, prior, fine=grid, top_k=8, cells=cells)
+        self.assertEqual(res["fix"], (spec.lat, spec.lon))
+        self.assertLess(res["rms_arcmin"], 0.5)
+        self.assertAlmostEqual(res["heading_deg"], spec.heading_deg, delta=0.2)
+
+    def test_free_pitch_mode_carries_a_measurable_linearization_error(self):
+        """The harness's first catch: free mode eliminates pitch as a MEAN,
+        which is the additive approximation -- the mild sibling of the
+        ultrawide's 2.15 deg disaster.  At 1.5 deg pitch on a 40 deg field it
+        is ~1.3 arcmin at the TRUE cell with ZERO noise; the fixed mode is
+        exact.  Kept as a measurement so nobody mistakes it for noise."""
+        import numpy as np
+        from imu_fusion.fix_pipeline import (SearchPrior, RenderGrid,
+                                             score_candidate, _render_window)
+        from imu_fusion.synthetic_scene import SceneSpec, observation_from_scene
+        dem = TestFixPipeline._IslandDem()
+        spec = SceneSpec(lat=40.0, lon=30.0, heading_deg=190.0, f35_mm=48.0,
+                         pitch_deg=1.5, roll_deg=0.8, eye_above_water_m=5.0,
+                         d_min_km=0.5, d_max_km=15.0)
+        prior = SearchPrior(lat=40.0, lon=30.0, heading_deg=190.0,
+                            heading_slack_deg=(-0.5, 0.5), heading_step_deg=0.05,
+                            focal_factors=(1.0,), box_lat_km=1.0, box_lon_km=1.0,
+                            cell_km=0.4, ground_range_m=(0.0, 10.0))
+        grid = RenderGrid(az_step_deg=0.05, d_min_km=0.5, d_max_km=15.0,
+                          d_step_km=0.05, column_step=6, water_level_m=0.0)
+        obs_free = observation_from_scene(dem, spec)               # pitch free
+        obs_fix = observation_from_scene(dem, spec, pitch_known=True)
+        w = _render_window(obs_fix, prior)
+        s_free, _, _ = score_candidate(dem, 40.0, 30.0, obs_free, prior, grid, w)
+        s_fix, _, _ = score_candidate(dem, 40.0, 30.0, obs_fix, prior, grid, w)
+        self.assertLess(s_fix * 60.0, 0.4)             # exact mode: interp only
+        self.assertGreater(s_free * 60.0, 0.8)         # linearization shows
+        self.assertLess(s_free * 60.0, 3.0)            # ...but stays mild here
+
+    def test_canopy_dem_grows_trees_on_land_only(self):
+        import numpy as np
+        from imu_fusion.synthetic_scene import CanopyDem
+        dem = TestFixPipeline._IslandDem()
+        cd = CanopyDem(dem, canopy_m=12.0, above_m=2.0)
+        la = np.array([39.945, 40.0]); lo = np.array([29.985, 30.0])
+        bare = dem.elevation(la, lo); dressed = cd.elevation(la, lo)
+        self.assertAlmostEqual(float(dressed[0] - bare[0]), 12.0, places=6)
+        self.assertAlmostEqual(float(dressed[1]), float(bare[1]), places=6)
+
+    def test_correlated_noise_has_the_asked_scale(self):
+        import numpy as np
+        from imu_fusion.synthetic_scene import corrupt_rows
+        rng = np.random.default_rng(11)
+        base = np.zeros(4032)
+        z = corrupt_rows(base, rng, sigma_px=3.0, corr_len_px=150.0)
+        self.assertAlmostEqual(float(z.std()), 3.0, delta=0.01)
+        # and it is genuinely correlated, not white
+        d = np.diff(z)
+        self.assertLess(float(d.std()), 0.5)
+
+
 class TestVisibility(unittest.TestCase):
     """What the camera can see, against what the DEM says is there."""
 
