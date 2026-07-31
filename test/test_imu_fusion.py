@@ -1881,6 +1881,67 @@ class TestWaterLevelClamp(unittest.TestCase):
                                  water_level_m=1897.0, **kw)
         self.assertTrue(bool(np.all(lake >= sea - 1e-9)))
 
+    def test_open_water_reaches_the_dip_by_itself_when_d_max_allows(self):
+        """The march needs NO help past the blind range, and this test is why.
+
+        It was written to prove a 10.6 arcmin bias on open water and instead
+        proved the opposite: max(-h/d - d/2R) is attained at d = sqrt(2hR) and
+        equals exactly -sqrt(2h/R), the dip.  A render reaching past the blind
+        range is already correct, and the ultrawide diagnosis that motivated the
+        clamp (d_max = 40 km, blind range 8.6 km) was simply wrong.
+        """
+        import numpy as np
+        from math import degrees, sqrt
+        from imu_fusion.terrain_resection import render_skyline
+        from imu_fusion.landfall import K_REFRACTION, effective_radius_km
+
+        class _AllWater:
+            def elevation(self, lat, lon):
+                return np.zeros(np.shape(lat))
+
+        eye = 5.0
+        r_eff = effective_radius_km(K_REFRACTION)
+        dip = degrees(sqrt(2.0 * eye / 1000.0 / r_eff))
+        blind = sqrt(2.0 * eye / 1000.0 * r_eff)
+        self.assertAlmostEqual(blind, 8.56, delta=0.05)
+        kw = dict(az_start=0.0, az_end=20.0, az_step=5.0, d_min_km=1.2,
+                  d_step_km=0.02, water_level_m=0.0)
+        _, far = render_skyline(_AllWater(), 40.0, 29.0, eye, d_max_km=40.0,
+                                clamp_water_horizon=False, **kw)
+        self.assertAlmostEqual(float(far.max()), -dip, places=3)
+
+    def test_clamp_repairs_a_render_truncated_short_of_the_blind_range(self):
+        """Where the clamp does earn its keep: d_max below sqrt(2hR)."""
+        import numpy as np
+        from math import degrees, sqrt
+        from imu_fusion.terrain_resection import render_skyline
+        from imu_fusion.landfall import K_REFRACTION, effective_radius_km
+
+        class _AllWater:
+            def elevation(self, lat, lon):
+                return np.zeros(np.shape(lat))
+
+        eye = 5.0
+        dip = degrees(sqrt(2.0 * eye / 1000.0 / effective_radius_km(K_REFRACTION)))
+        kw = dict(az_start=0.0, az_end=20.0, az_step=5.0, d_min_km=1.2,
+                  d_max_km=2.0, d_step_km=0.02, water_level_m=0.0)
+        _, off = render_skyline(_AllWater(), 40.0, 29.0, eye,
+                                clamp_water_horizon=False, **kw)
+        _, on = render_skyline(_AllWater(), 40.0, 29.0, eye, **kw)
+        self.assertGreater((-dip - float(off.max())) * 60.0, 4.0)
+        self.assertAlmostEqual(float(on.max()), -dip, places=9)
+
+    def test_clamp_never_lowers_a_land_horizon(self):
+        """Real terrain stands above the water horizon, so the clamp is inert."""
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline
+        kw = dict(az_start=0.0, az_end=20.0, az_step=5.0, d_min_km=1.0,
+                  d_max_km=20.0, d_step_km=0.5, water_level_m=0.0)
+        _, off = render_skyline(self._Dem(), 40.0, 29.0, 5.0,
+                                clamp_water_horizon=False, **kw)
+        _, on = render_skyline(self._Dem(), 40.0, 29.0, 5.0, **kw)
+        self.assertTrue(bool(np.allclose(on, off)))
+
 
 class TestSkylineDP(unittest.TestCase):
     """Continuity-constrained boundary tracing, against per-column decisions."""
@@ -1958,6 +2019,76 @@ class TestResectionGeometry(unittest.TestCase):
     # the two real scenes this study measured, as (distance_km, height_m)
     ISTANBUL = [(49.0, 871), (52.0, 937), (53.0, 1125), (71.8, 1122)]
     DENVER = [(14.6, 1770), (92.5, 4346)]
+
+    def test_pitch_is_a_rotation_not_an_additive_offset(self):
+        """The horizon is a plane through the camera centre, so however the
+        camera is tilted it must come back FLAT.  The additive-pitch shortcut
+        fails this by degrees on a wide lens, and the failure is symmetric in x,
+        so it mimics a wrong position instead of looking like a bug."""
+        import numpy as np
+        from imu_fusion.resection_geometry import image_ray_angles
+        f, pitch = 2145.0, 6.0                      # iPhone 0.5x ultrawide
+        az_true = np.radians(np.linspace(-50.0, 50.0, 41))
+        # project the elevation-zero plane into a camera pitched up by `pitch`
+        cp, sp = np.cos(np.radians(pitch)), np.sin(np.radians(pitch))
+        vy = -np.cos(az_true) * sp
+        vz = np.cos(az_true) * cp
+        xi, yi = f * np.sin(az_true) / vz, -f * vy / vz
+        az, el = image_ray_angles(xi, yi, f, pitch_deg=pitch)
+        self.assertLess(float(np.abs(el).max()), 1e-9)
+        self.assertLess(float(np.abs(az - np.degrees(az_true)).max()), 1e-9)
+        # and the shortcut this replaced is wrong by DEGREES at the frame edge
+        shortcut = np.degrees(np.arctan(-yi / np.hypot(f, xi))) + pitch
+        self.assertGreater(float(np.abs(shortcut).max()), 2.0)
+
+    def test_ray_angles_reduce_to_the_textbook_formulae_at_zero_tilt(self):
+        """With no pitch or roll the proper rotation must agree exactly with the
+        simple expressions, so the fix cannot have disturbed the narrow-lens
+        results that were already correct."""
+        import numpy as np
+        from imu_fusion.resection_geometry import image_ray_angles
+        f = 23297.0                                  # iPhone 8x telephoto
+        x = np.array([-1800.0, -400.0, 0.0, 900.0, 2000.0])
+        y = np.array([-500.0, 120.0, 0.0, -60.0, 300.0])
+        az, el = image_ray_angles(x, y, f)
+        self.assertTrue(bool(np.allclose(az, np.degrees(np.arctan(x / f)))))
+        self.assertTrue(bool(np.allclose(
+            el, np.degrees(np.arctan(-y / np.hypot(f, x))))))
+
+    def test_horizon_line_tracks_the_lower_envelope_not_the_middle(self):
+        """Land is never below the sea horizon, so the horizon is the boundary's
+        lower envelope.  Fitting a MIDDLE quantile -- the natural thing to write
+        -- climbs onto the island ridges; on a real ultrawide frame that was
+        worth 1.15 deg of pitch."""
+        import numpy as np
+        from imu_fusion.resection_geometry import horizon_line
+        rows = np.full(600, 400.0)
+        rows[100:250] -= 60.0                        # islands rise ABOVE it
+        rows[350:500] -= 45.0
+        slope, intercept, mask = horizon_line(rows)
+        self.assertAlmostEqual(slope, 0.0, places=6)
+        self.assertAlmostEqual(intercept, 400.0, places=4)
+        self.assertEqual(int(mask.sum()), 300)       # exactly the water columns
+        self.assertFalse(bool(mask[150]))
+        # a middle-quantile fit lands on the ridges instead
+        cols = np.arange(600.0)
+        keep = np.ones(600, bool)
+        for _ in range(6):
+            c = np.polyfit(cols[keep], rows[keep], 1)
+            r = rows - np.polyval(c, cols)
+            keep = (r > np.percentile(r[keep], 25) - 6) & (r < np.percentile(r, 55))
+        self.assertGreater(abs(np.polyval(c, 300.0) - 400.0), 20.0)
+
+    def test_horizon_line_recovers_roll(self):
+        """A rolled horizon is still a straight line; its slope IS the roll."""
+        import numpy as np
+        from imu_fusion.resection_geometry import horizon_line
+        cols = np.arange(800.0)
+        true_slope = -0.0125
+        rows = 2400.0 + true_slope * cols
+        rows[200:400] -= 70.0
+        slope, _, _ = horizon_line(rows)
+        self.assertAlmostEqual(slope, true_slope, places=6)
 
     def test_nuisance_biases_destroy_most_of_the_leverage(self):
         """A compass bias eats the common bearing shift, a pitch bias the common

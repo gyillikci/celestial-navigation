@@ -492,6 +492,92 @@ def angle_from_pixels(x_near, x_far, px_per_deg):
     return (float(x_far) - float(x_near)) / float(px_per_deg)
 
 
+def image_ray_angles(x_px, y_px, f_px, pitch_deg=0.0, roll_deg=0.0,
+                     cx=None, cy=None):
+    ''' Pixel coordinates -> (azimuth offset, elevation), both in degrees.
+
+        PITCH IS A ROTATION, NOT AN OFFSET, and that distinction is the single
+        largest error this project made on a wide frame.  The tempting shortcut
+
+            el = atan(-y / hypot(f, x)) + pitch          # WRONG
+
+        adds the tilt to an angle measured in the camera's own frame.  It is
+        exact only on the optical axis and degrades as the square of the field
+        angle.  Measured on the iPhone 0.5x ultrawide -- f = 2145 px, a 106 deg
+        horizontal field, 6 deg of pitch -- it errs by 2.4 DEGREES at the frame
+        edges, and because the error is symmetric in x it puts a clean U-shape in
+        the residual that is indistinguishable from a wrong position.  On the 8x
+        telephoto (9.9 deg field) the same shortcut is worth 0.05 arcmin, which is
+        exactly why it survived unnoticed until a wide lens arrived.
+
+        The correct route is to build the ray in camera coordinates, undo roll,
+        rotate by pitch about the horizontal axis, and only then read off the
+        angles.  Azimuth offset is measured about the vertical, so it is
+        `atan2(vx, wz)` -- NOT `atan(x/f)`, which is again only true at zero
+        pitch.
+
+        Returns arrays shaped like `x_px`.  Add the compass heading to the
+        azimuth offset to get true bearing.
+    '''
+    x = np.asarray(x_px, dtype=float)
+    y = np.asarray(y_px, dtype=float)
+    f = float(f_px)
+    if cx is not None:
+        x = x - float(cx)
+    if cy is not None:
+        y = y - float(cy)
+    cr, sr = math.cos(math.radians(roll_deg)), math.sin(math.radians(roll_deg))
+    xp = x * cr + y * sr
+    yp = -x * sr + y * cr
+    vx, vy, vz = xp, -yp, np.full(np.shape(xp), f, dtype=float)
+    norm = np.sqrt(vx * vx + vy * vy + vz * vz)
+    cp, sp = math.cos(math.radians(pitch_deg)), math.sin(math.radians(pitch_deg))
+    wz = vz * cp - vy * sp
+    wy = vz * sp + vy * cp
+    return np.degrees(np.arctan2(vx, wz)), np.degrees(np.arcsin(wy / norm))
+
+
+def horizon_line(rows, quantile=0.80, iters=12, tol_px=4.0):
+    ''' Fit the sea horizon to an extracted skyline: its LOWER ENVELOPE.
+
+        The horizon is a plane through the camera centre, so in a rectilinear
+        image it is a STRAIGHT LINE, always -- pitch and roll move it but cannot
+        bend it.  Land is never below it.  So the horizon is the lower envelope
+        of the boundary (largest row indices), and fitting it means iteratively
+        keeping the points BELOW the current line, not the ones near its middle.
+
+        A robust fit that keeps a middle quantile of residuals -- the natural
+        thing to write, and what this project first wrote -- converges onto the
+        ISLAND RIDGES whenever land covers much of the frame.  On the ultrawide
+        Istanbul frame that misplaced the horizon by 43 px = 1.15 deg of pitch,
+        and an independent check at the known position demanded 1.04 deg back.
+
+        Returns (slope_px_per_col, intercept_px, mask) where `mask` marks the
+        columns lying within `tol_px` of the fitted line.
+
+        CHECK THE RESULT BEFORE TRUSTING IT.  A line can be fitted to any
+        envelope; that does not make it a horizon.  The honest test is whether
+        the flat stretches of the boundary are COLLINEAR.  On the frame above
+        they sat at rows 2422, 2394 and 2391 across the width and were not, which
+        means at most one was water and the rest were distant low land -- so that
+        frame had no measurable horizon and pitch had to stay a fitted nuisance.
+    '''
+    r = np.asarray(rows, dtype=float)
+    cols = np.arange(len(r), dtype=float)
+    good = np.isfinite(r)
+    keep = good.copy()
+    coef = np.polyfit(cols[keep], r[keep], 1)
+    for _ in range(int(iters)):
+        resid = r - np.polyval(coef, cols)
+        thresh = np.percentile(resid[good], quantile * 100.0)
+        keep = good & (resid >= thresh)
+        if keep.sum() < 3:
+            break
+        coef = np.polyfit(cols[keep], r[keep], 1)
+    resid = r - np.polyval(coef, cols)
+    return float(coef[0]), float(coef[1]), good & (np.abs(resid) < float(tol_px))
+
+
 # --------------------------------------------------------------------------- #
 # Correlated residuals: why more pixels stop helping
 # --------------------------------------------------------------------------- #

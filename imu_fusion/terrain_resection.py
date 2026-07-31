@@ -204,7 +204,8 @@ def render_skyline(dem, lat: float, lon: float, cam_height_m: float,
                    az_start: float = 0.0, az_end: float = 360.0,
                    az_step: float = 0.05, d_min_km: float = 0.10,
                    d_max_km: float = 45.0, d_step_km: float = 0.05,
-                   k: float = K_REFRACTION, water_level_m: float = None):
+                   k: float = K_REFRACTION, water_level_m: float = None,
+                   clamp_water_horizon: bool = True):
     ''' Horizon elevation angle (degrees) versus azimuth, as seen from
         (lat, lon) at `cam_height_m` above sea level.
 
@@ -234,6 +235,25 @@ def render_skyline(dem, lat: float, lon: float, cam_height_m: float,
         Istanbul: a phantom +0.65 deg from 6 m of DEM shoreline at 300 m.  Raise
         `d_min_km` past the smear (1.2 km sufficed there) whenever the camera is
         on a shore.
+
+        `clamp_water_horizon` guards a THIRD trap, and the interesting thing about
+        it is how narrow it turns out to be.  Along an azimuth with no land in
+        range the profile is the maximum of -h/d - d/(2 R_eff), and that maximum
+        is attained at d = sqrt(2 h R_eff) -- the blind range -- where its value
+        is exactly -sqrt(2h/R_eff), the true dip.  So the march finds the sea
+        horizon by itself PROVIDED `d_max_km` reaches the blind range: 8.6 km for
+        a 5 m eye, 24 km for 40 m.  Short-range renders truncate before that and
+        report the water too low (5 arcmin too low at d_max = 2 km, 0.6 at 5 km).
+        Nothing can appear below the water horizon, so the profile is clamped.
+
+        This was first written to fix a supposed 10.6 arcmin bias on an ultrawide
+        frame whose render used d_max = 40 km.  That diagnosis was WRONG -- the
+        march was already returning -4.016 arcmin, the correct dip -- and a unit
+        test caught it.  The clamp stays because short-range renders are real, but
+        it is a guard, not a repair.
+
+        The clamp only acts when `water_level_m` is set and the camera is above
+        it, so land-only callers are unaffected; pass False to disable.
     '''
     azs = np.arange(az_start, az_end, az_step)
     ds = np.arange(d_min_km, d_max_km, d_step_km)
@@ -245,7 +265,13 @@ def render_skyline(dem, lat: float, lon: float, cam_height_m: float,
         H = np.maximum(H, float(water_level_m))
     alpha = np.degrees((H - cam_height_m) / 1000.0 / D
                        - D / (2.0 * effective_radius_km(k)))
-    return azs, alpha.max(axis=1)
+    profile = alpha.max(axis=1)
+    if water_level_m is not None and clamp_water_horizon:
+        eye = cam_height_m - float(water_level_m)
+        if eye > 0.0:
+            dip = degrees(sqrt(2.0 * eye / 1000.0 / effective_radius_km(k)))
+            profile = np.maximum(profile, -dip)
+    return azs, profile
 
 
 def skyline_peaks(azs, profile, window: int = 20, min_prominence: float = 0.10):

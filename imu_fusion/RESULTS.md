@@ -1658,3 +1658,116 @@ shore-adjacent ground, improved crest-only from **250 m to 188 m**.  The old
 parameterisation let a candidate standing on 40 m of DEM ground claim a 42 m eye
 and rescale every predicted elevation to suit.  Removing that freedom is worth
 more than any observable added so far.
+
+---
+
+## The 0.5× ultrawide: three bugs, one of them mine twice over
+
+A single **iPhone 17 Pro ultrawide** frame (IMG_7846, 5712×4284, **no EXIF at
+all** — no GPS, no heading, no focal length) looked like the answer to
+everything the three telephoto frames lacked. In one exposure it covers
+**106°** of azimuth, so four separated island groups share **one** compass
+offset instead of each carrying its own drifting one; and it appeared to show
+the **open sea horizon**, which would make pitch a *measurement* rather than a
+fitted nuisance. Free parameters would have collapsed from (position, compass,
+pitch, drift) to (position, compass).
+
+It solved to **9.6 km**, then **7.4 km**, then **1.4 km at separation 1.00×**,
+which is to say it never solved at all. Getting from there to an explanation
+took three corrections, and the honest record matters more than the result.
+
+### 1. Pitch is a rotation, not an offset — 2.15° at the frame edge
+
+I had written the elevation of each skyline pixel as
+
+```
+el = atan(−y / hypot(f, x)) + pitch          # WRONG
+```
+
+That adds the tilt to an angle measured in the *camera's own* frame. It is exact
+on the optical axis and degrades as the square of the field angle. On the 8×
+telephoto (9.9° field) it is worth **0.05′** and never showed. Here — f = 2145 px,
+±53°, 6° of pitch — it errs by **2.15°** at the edges, and because the error is
+symmetric in `x` it puts a clean U in the residual that is indistinguishable
+from a wrong position. The diagnostic that exposed it: +78.5′ at az 175.9,
+−67.4′ at az 205.4, +133.1′ at az 278.6.
+
+The fix is `resection_geometry.image_ray_angles` — build the ray, undo roll,
+rotate about the horizontal axis, *then* read the angles. Azimuth is
+`atan2(vx, wz)`, not `atan(x/f)`, which is likewise only true at zero pitch. The
+unit test projects the elevation-zero plane into a pitched camera and demands it
+come back flat: it does, to **1e-15 degrees**.
+
+### 2. The sea horizon is the LOWER envelope, not the middle — 1.15° of pitch
+
+My robust line fit kept the 25th–55th percentile of residuals. On a frame where
+land covers much of the width, that quantile band lands **on the island ridges**.
+Land is never *below* the sea horizon, so the horizon is the boundary's lower
+envelope. The error was 43 px = **1.15° of pitch**, and the independent
+diagnostic at the known site demanded **1.04°** back — two routes, one number.
+
+`resection_geometry.horizon_line` now fits the envelope by iteratively keeping
+the points *below* the current line.
+
+**But it did not rescue the frame**, and the reason is worth more than the fix.
+The flat stretches of this boundary sit at rows **2422** (x≈2200), **2394**
+(x≈4400) and **2391** (x≈5650) — and they are **not collinear**. A sea horizon
+is a plane through the camera centre, so in a rectilinear image it projects to a
+straight line, always. At most one of those plateaus is water; the rest are
+distant low land. **This frame has no measurable horizon**, so pitch went back
+to being a fitted nuisance and the ultrawide's headline advantage evaporated.
+
+### 3. A bug I invented, and the test that caught it
+
+I then "fixed" a third problem that did not exist. Reasoning that
+`render_skyline` marches from `d_min = 1.2 km` (needed to skip the SRTM
+coastline smear), I claimed open water was being predicted at **−14.6′** instead
+of the true dip **−4.0′** — a 10.6′ bias on the 40% of samples lying on sea.
+
+It is wrong. The march takes the **maximum along the ray**, and
+`−h/d − d/(2R_eff)` peaks at exactly `d = √(2hR_eff)` — the blind range — with
+value exactly `−√(2h/R_eff)`, the dip. With `d_max = 40 km` and a blind range of
+**8.56 km**, the render was already returning **−4.016′**. I had read α *at*
+`d_min` rather than the maximum over the ray.
+
+The unit test I wrote to prove the bias proved the opposite and failed. The
+`clamp_water_horizon` guard stays, because renders that stop *short* of the
+blind range are real (5′ too low at `d_max = 2 km`, 0.6′ at 5 km), but it is a
+guard, not a repair.
+
+### What the frame actually says
+
+With all three handled — proper rotation, pitch free, roll and f gridded — the
+best fit near the telephoto site is **rms 27.5′ at separation 1.00×**, and `f`
+rails to the top of whatever grid it is given. Two diagnostics explain why.
+
+**The residual grows with field angle, symmetrically.** Fitting heading and
+pitch on the central columns only and then looking outward:
+
+| \|field angle\| | 0–10° | 10–20° | 20–30° | 30–40° | 40–55° |
+|---|---|---|---|---|---|
+| rms | 10.6′ | 14.6′ | 46.1′ | 65.1′ | 89.6′ |
+
+A wrong position makes the residual vary with *azimuth*. Growth that is
+symmetric about the optical axis is the **lens mapping**. Testing gnomonic,
+cylindrical and equidistant models against the DEM separated them by under 3′
+while all three railed `f` to the grid edge — so this is not a projection being
+identified, it is a fit collapsing the field until any DEM wiggle will do.
+
+**And the invariants say it is the wrong place.** Angular *widths* and *gaps*
+are untouched by compass offset and by pitch — those shift the pattern, they do
+not stretch it. From 40.906 N 29.139 E the DEM shows **75.8° of unbroken
+mainland** (az 140–215.8, peak 110′). The photo shows small island groups
+separated by wide open water. No focal length reconciles those.
+
+The likeliest reading is that this frame is simply **from somewhere else** — it
+carries no GPS, and its foreground is a rock breakwater unlike the earlier
+frames. A blind search over every coast the tiles cover is the only way to
+settle it, and it is reported below.
+
+**What survives for the phone app.** The ultrawide's 106° of bearing diversity
+under a single compass offset is still the right instrument on paper. What this
+frame shows is the price of admission: at ±53° the delivered image must be
+**calibrated**, not assumed rectilinear, and the sea horizon must be *verified
+collinear* before it is allowed to fix pitch. Both are cheap on-device checks
+that the telephoto never needed.
