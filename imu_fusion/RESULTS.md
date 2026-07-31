@@ -1597,3 +1597,64 @@ police a degenerate parameter — only an external bound on the parameter itself
 can.  Beating 150 m needs a landmark with genuine bearing diversity; all three
 frames look at the same 20° arc, so nothing in them separates "the camera moved
 along-shore" from "the compass reads high".
+
+### Adding the waterline: it makes the fix worse, for a reason already in the code
+
+The waterline was the obvious next observable — the one contour whose height is
+known everywhere, and crest-minus-waterline is pitch-free.  It extracts cleanly
+here (69–78% of columns; the red channel separates land at r = 52–106 from water
+at r = 0–12, a margin dusk never gave at Bodrum).  Stacked with the crest under
+one shared pitch offset per frame, so the extent constraint emerges rather than
+being hand-coded:
+
+| | rank-1 | top-10 median | rms |
+|---|---|---|---|
+| crest only | **188 m** | **263 m** | 5.24′ |
+| crest + waterline | 600 m | 350 m | 5.63′ |
+
+It is **worse on every measure**, and the same comparison at 2.6 m eye height
+gave 5.23′ against 5.65′.  Two heights, one verdict.
+
+**`waterline_range` predicted this.**  Depression is `−(h/d + d/2R)`: the
+eye-height term falls with range while curvature grows, so the curve is
+stationary at `√(2hR)` and carries **no range information there**.
+
+| eye | blind range | sensitivity at 4 km | at 5 km | at 7 km |
+|---|---|---|---|---|
+| 2.6 m | 6.17 km | +0.32′/km | +0.12′/km | −0.05′/km |
+| **5.0 m** | 8.56 km | +0.84′/km | +0.45′/km | +0.12′/km |
+
+The islands sit at **4–7 km**, i.e. astride the blind range.  Raising the eye to
+5 m moves every target onto the near branch — a real improvement — but 0.45′/km
+against a few arcmin of measurement error still means *kilometres* of range
+uncertainty, far looser than the crest already provides.
+
+And the excess is not noise: the DEM predicts **0.3′** of shoreline-depression
+variation across the whole 34° arc while the measurement carries **~9′** of
+shape.  That 9′ is real — bays, headlands, the beach below 063 — but it is
+azimuthal *shape* sampled against SRTM's 30 m coastline, not range.  Feeding it
+in adds structure the model cannot explain, which is precisely why the residual
+rose rather than fell.
+
+**The waterline is a NEAR-field instrument.**  Useful under ~2 km at a 5 m eye,
+marginal at 4 km, worthless at 7.  Nothing is wrong with the observable; this
+viewpoint is the one geometry where it is blind.
+
+![waterline ablation](results/fig_istanbul_waterline_ablation.png)
+
+**Two process notes, both mine.**  The first run of this ablation was *invalid*:
+`shore_depression` marched from 0.4 km, so the observer's own shore was the first
+land hit, every azimuth returned NaN, and the waterline term was silently
+dropped — I compared crest-only against crest-only.  That is trap 2 from the
+section above, documented for the crest render and then not applied here.  And
+the first version of the figure plotted the measured waterline without the
+per-frame pitch offset, showing a 50′ "disagreement" that was almost entirely
+uncorrected pitch; the solve removes it as a mean, so the solve was fair while
+the picture was not.
+
+**What the 5 m height did buy.**  Not the waterline, but the crest: fixing the
+eye ABSOLUTELY rather than as ground + 2 m, and restricting candidates to
+shore-adjacent ground, improved crest-only from **250 m to 188 m**.  The old
+parameterisation let a candidate standing on 40 m of DEM ground claim a 42 m eye
+and rescale every predicted elevation to suit.  Removing that freedom is worth
+more than any observable added so far.
