@@ -2113,3 +2113,39 @@ was the last thing run here and it reframed the whole failure; (3) a shot
 through glass needs either a windscreen term in the model or a "don't" in the
 capture guidance. The phone app controls its capture conditions; a handheld
 shot out of the window would likely have dropped the floor substantially.
+
+---
+
+## Experiment: grow the GPS box until the photo alone must carry it
+
+The question behind it, asked directly in review: *if GPS only sets the search
+box, how much is the box doing?* Answer by growing it — 31, 125, 484, 1936 km² —
+on both real frames, with everything else frozen.
+
+| frame | 31 km² | 125 km² | 484 km² | 1936 km² |
+|---|---|---|---|---|
+| **coastal 000039** — err | 304 m | 381 m | **250 m** | **304 m** |
+| — separation | 1.78× | 1.95× | 2.25× | **2.55×** |
+| **in-car 000083** — err | 541 m | 5209 m | 6964 m | — |
+| — separation | 1.04× | 1.11× | 1.01× | — |
+
+**The coastal fix does not merely survive box growth — its separation *rises***
+(1.78× → 2.55×), because separation is the ratio of the best *distant* impostor
+to the winner: every new patch of coast sampled and beaten widens the margin.
+At 1936 km² — a 44 × 44 km box, 3871 candidates — the skyline alone still lands
+**304 m** from the GPS point, coarse-ranking the winner #2. The GPS prior is
+doing almost nothing for this frame beyond saving compute.
+
+**The in-car frame fails exactly as its verdict predicted.** At 31 km² the
+winner is 541 m out at 1.04× — indistinguishable from its neighbours. At
+125 km² the winner jumps **5.2 km** to an impostor valley; at 484 km², **7.0
+km**. The ~30′ windscreen-and-haze floor swamps the terrain signal the moment
+genuinely different terrain is allowed to compete. For this frame the GPS box
+was not a convenience, it was the *only* thing keeping the estimate near the
+truth — which is precisely what separation 1.04× had already said.
+
+The two rows together are the cleanest validation the separation metric has had:
+above ~1.7× the fix is *earned* and box size is irrelevant; at ~1.0× the
+"answer" is the prior wearing a costume.
+
+![box growth](results/fig_box_growth.png)
