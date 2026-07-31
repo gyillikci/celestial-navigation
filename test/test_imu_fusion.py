@@ -1834,6 +1834,54 @@ class TestSkylineExtract(unittest.TestCase):
         self.assertGreater(np.isfinite(out[440:]).sum(), 140, "terrain deleted")
 
 
+class TestWaterLevelClamp(unittest.TestCase):
+    """Bathymetry must not be treated as visible terrain."""
+
+    class _Dem:
+        """Deep water in the near field, a real hill beyond it."""
+        def elevation(self, lat, lon):
+            import numpy as np
+            d = np.hypot(np.asarray(lat) - 40.0, np.asarray(lon) - 29.0)
+            return np.where(d < 0.05, -900.0, 120.0)
+
+    def test_clamp_hides_the_sea_floor(self):
+        """A -900 m sea floor is not a horizon; the water surface is.
+
+        The tiles this project fetches are SRTM merged with bathymetry, so an
+        unclamped render can place the horizon on the sea BED.  Clamping to the
+        water level must never LOWER the horizon and must never let a negative
+        height set it.
+        """
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline
+        dem = self._Dem()
+        _, raw = render_skyline(dem, 40.0, 29.0, 5.0, az_start=0.0, az_end=20.0,
+                                az_step=5.0, d_min_km=1.0, d_max_km=20.0,
+                                d_step_km=0.5)
+        _, clamped = render_skyline(dem, 40.0, 29.0, 5.0, az_start=0.0,
+                                    az_end=20.0, az_step=5.0, d_min_km=1.0,
+                                    d_max_km=20.0, d_step_km=0.5,
+                                    water_level_m=0.0)
+        self.assertTrue(bool(np.all(clamped >= raw - 1e-9)))
+        self.assertTrue(bool(np.all(np.isfinite(clamped))))
+
+    def test_clamp_is_opt_in_and_takes_a_lake_level(self):
+        """Default unchanged; a lake clamps to its own surface, not to zero."""
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline
+        dem = self._Dem()
+        kw = dict(az_start=0.0, az_end=10.0, az_step=5.0, d_min_km=1.0,
+                  d_max_km=20.0, d_step_km=0.5)
+        _, a = render_skyline(dem, 40.0, 29.0, 5.0, **kw)
+        _, b = render_skyline(dem, 40.0, 29.0, 5.0, water_level_m=None, **kw)
+        self.assertTrue(bool(np.allclose(a, b)))
+        # a lake surface well above zero must raise the near-field horizon
+        _, sea = render_skyline(dem, 40.0, 29.0, 1900.0, water_level_m=0.0, **kw)
+        _, lake = render_skyline(dem, 40.0, 29.0, 1900.0,
+                                 water_level_m=1897.0, **kw)
+        self.assertTrue(bool(np.all(lake >= sea - 1e-9)))
+
+
 class TestSkylineDP(unittest.TestCase):
     """Continuity-constrained boundary tracing, against per-column decisions."""
 

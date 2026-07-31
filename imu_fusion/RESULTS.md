@@ -1369,3 +1369,91 @@ known-height contour with a 60× range spread — remains unmeasured, blocked on
 segmentation rather than on geometry or on estimation.  That is where the
 learned-segmentation half of the skyline literature earns its keep, and it is the
 honest next step rather than a third hand-tuned colour rule.
+
+## Istanbul: a fully anchored frame, and what three frames reveal that one cannot
+
+Three iPhone 17 Pro frames from the Kartal/Maltepe shore, 31 July 2026, taken
+within 3.5 s of each other while panning across the Princes' Islands.  Every
+parameter this study has ever had to fit is carried in EXIF:
+
+| | |
+|---|---|
+| position | 40.906223 N, 29.139447 E (GPS), eye **2.5 m** above sea level |
+| heading | `GPSImgDirection`, TRUE |
+| pitch | Theodolite `vert_angle_deg` in `ImageDescription` |
+| focal | `FocalLengthIn35mmFilm = 200`, `DigitalZoomRatio = 8.0` → **406.6 px/deg**, 9.89° field |
+
+So nothing is searched.  The DEM prediction is a *prediction*, and the residual
+measures the model rather than a fit.
+
+### The match: 2.3 arcmin
+
+Frame 067 (heading 244.35°) looks at **Burgazada — summit 159 m at 7.4 km**.  With
+position, scale and attitude all given, the only freedoms are the two classical
+nuisances, and after removing them the silhouette matches summit-to-shoulder:
+
+| | |
+|---|---|
+| shape residual | **2.3′ rms** over 12° of island |
+| target range | 6.6–7.4 km, heights 35–159 m |
+
+That is the tightest terrain match in this study — Tahoe's 2.12′ came with a
+*fitted* position, this one with a **given** one.
+
+### Three real bugs, all found by this scene
+
+1. **The DEM tiles are not pure SRTM.**  The AWS `elevation-tiles-prod` product
+   is SRTM merged with **bathymetry** — N40E028 holds 4.1 M cells below −100 m,
+   minimum −1308 m.  A camera sees the water *surface*, never the sea floor.
+   `render_skyline(..., water_level_m=0.0)` now exists for this; the parameter
+   takes a lake level too (1897.0 at Tahoe) and stays opt-in, because genuine
+   below-datum land exists.
+2. **SRTM smears coastlines.**  Standing at the water's edge, the ~30 m posting
+   puts ~6 m of spurious "land" 300 m out along *seaward* azimuths, which the
+   renderer faithfully reports as a phantom **+0.65° horizon floor at every
+   bearing**.  Start the march past the smear (1.2 km sufficed).
+3. **`skyline_dp` picked the wrong edge — twice.**  It finds the *strongest*
+   boundary, and here bright shoreline houses against dark sea is a ~145-unit
+   luminance drop against ~113 for blue sky over a green hillside, so it locked
+   onto the **waterline**.  The sky model is the right tool because it looks for
+   departure from a *fitted sky*, not for the biggest step.
+
+**Consequence for an earlier result.**  The same polarity mistake invalidates the
+Bodrum reproduction reported above: it extracted rows 785–1136 of a 1206-tall
+frame — the waterline, not the ridge.  The conclusion drawn from it ("the true
+position ranks 169th, so ranking is the problem") **does not stand**; it was
+scored against a wrongly extracted skyline.
+
+### What one frame cannot tell you, and three can
+
+Fitting frame 067 alone gives a compass offset of +2.50°, and it is tempting —
+I did it — to call that an instrument *bias*.  Two more frames from the same
+tripod-less spot, seconds apart, say otherwise:
+
+| frame | time | EXIF heading | fitted compass offset | shape rms |
+|---|---|---|---|---|
+| 063 | 11:47:05.0 | 233.889° | **+0.00°** | 5.7′ |
+| 065 | 11:47:06.1 | 238.324° | **+1.00°** | 10.3′ |
+| 067 | 11:47:08.5 | 244.345° | **+2.50°** | 2.3′ |
+
+The offset grows **monotonically with time** through a clockwise pan of ~3°/s.
+Noise does not order itself; this is the **magnetometer lagging the slew**, and
+the lag accumulating as the rotation continues.  Each minimum is sharp (frame
+065: 10′ at the best offset against 32′ at −3°), so the values are well
+determined, not degenerate.
+
+Frame 065 was a genuine held-out prediction: interpolating 063 and 067 gave
++0.8–1.1°, and the fit returned **+1.00°**.
+
+Two things follow, and both were mis-stated before the extra frames arrived:
+
+- **A compass "bias" fitted from one frame is not a constant.**  Only a second
+  frame can separate an instrument offset from a transient, and the transfer test
+  is the one that matters: 067's biases applied blind to 063 give 17.4′ against
+  5.7′ refitted.
+- **Fits are worst mid-slew.**  Frame 065's residual is not random but
+  *structured* (−17′, +12′, −18′, +13′ across the frame): a single constant
+  azimuth offset cannot describe a frame whose heading is changing during
+  readout.  This is direct empirical support for the least-rotation shutter gate
+  — take the shot when the phone is still, and estimate the compass offset **per
+  keyframe**, which is what `terrain_factors.solve_landmark_fix` already models.

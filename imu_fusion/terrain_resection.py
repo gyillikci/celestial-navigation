@@ -204,7 +204,7 @@ def render_skyline(dem, lat: float, lon: float, cam_height_m: float,
                    az_start: float = 0.0, az_end: float = 360.0,
                    az_step: float = 0.05, d_min_km: float = 0.10,
                    d_max_km: float = 45.0, d_step_km: float = 0.05,
-                   k: float = K_REFRACTION):
+                   k: float = K_REFRACTION, water_level_m: float = None):
     ''' Horizon elevation angle (degrees) versus azimuth, as seen from
         (lat, lon) at `cam_height_m` above sea level.
 
@@ -213,6 +213,27 @@ def render_skyline(dem, lat: float, lon: float, cam_height_m: float,
         effective radius, exactly as in `landfall.vertical_angle_deg`:
 
             alpha = (H - h)/d - d / (2 R_eff)
+
+        `water_level_m` clamps terrain heights UP to that level, and on any
+        coastal or lake scene you almost certainly want it.  The tiles this
+        project fetches (AWS `elevation-tiles-prod`, the Mapzen terrain product)
+        are SRTM on land MERGED WITH BATHYMETRY: measured on N40E028, 4.1 million
+        cells lie below -100 m and the minimum is -1308 m.  What a camera sees
+        over water is the water SURFACE, not the sea floor, so pass 0.0 at the
+        coast and the lake level inland (1897.0 for Lake Tahoe).
+
+        Leaving it None keeps raw heights, which is right only where genuine
+        below-datum LAND is in view (Dead Sea, Death Valley) and wrong wherever
+        there is water.  It stays the default so existing callers are unchanged.
+
+        A second, subtler trap has no parameter because it needs judgement:
+        SRTM's ~30 m posting SMEARS COASTLINES, so a camera standing at the
+        water's edge sees a few metres of spurious "land" a few hundred metres
+        out along seaward azimuths, which this function faithfully reports as a
+        horizon floor of half a degree or more at EVERY bearing.  Measured at
+        Istanbul: a phantom +0.65 deg from 6 m of DEM shoreline at 300 m.  Raise
+        `d_min_km` past the smear (1.2 km sufficed there) whenever the camera is
+        on a shore.
     '''
     azs = np.arange(az_start, az_end, az_step)
     ds = np.arange(d_min_km, d_max_km, d_step_km)
@@ -220,6 +241,8 @@ def render_skyline(dem, lat: float, lon: float, cam_height_m: float,
     A, D = np.meshgrid(np.radians(azs), ds, indexing="ij")
     H = dem.elevation(lat + D * np.cos(A) * _DEG_PER_KM_LAT,
                       lon + D * np.sin(A) * dlon_per_km)
+    if water_level_m is not None:
+        H = np.maximum(H, float(water_level_m))
     alpha = np.degrees((H - cam_height_m) / 1000.0 / D
                        - D / (2.0 * effective_radius_km(k)))
     return azs, alpha.max(axis=1)
