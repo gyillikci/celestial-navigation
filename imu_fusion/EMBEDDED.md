@@ -43,6 +43,23 @@ literally what a GPU texture unit plus a wavefront reduction does in hardware,
 which is why this problem is a good fit for an accelerator — but see §2, because
 the obvious accelerator is the wrong one.
 
+**Correction: "97 % gather" is a fact about numpy, not about the algorithm.**
+The table above times `dem.elevation` against the angle arithmetic. Breaking
+`dem.elevation` open shows that most of it is not the gather at all:
+
+| inside `dem.elevation` (0.113 M samples, 16.2 ms) | time | share |
+|---|---|---|
+| float64 index arithmetic + per-tile boolean masking | 9.7 ms | **60 %** |
+| 4-tap fetch + bilinear blend | 3.1–3.3 ms | **19–20 %** |
+| remainder (allocation, dispatch) | ~3.2 ms | ~20 % |
+
+So the *memory traffic* is under a fifth of the call, and the 60 % is Python-layer
+overhead that does not exist in a CUDA kernel at all. Two consequences. First,
+this CPU profile systematically misleads about a GPU port: the thing to size is
+the memory traffic (§6), not the wall clock measured here. Second, any effort
+spent making the *CPU* path faster should go at the index arithmetic first, not
+the fetch — which is the opposite of what the 97 % figure suggests.
+
 ## 2. Precision: fp32 is required, fp16 is fatal
 
 Rendering the same site in three precisions and comparing against float64:
@@ -192,12 +209,45 @@ The search is embarrassingly parallel over `(candidate, azimuth)` — 121 × 120
 max-reduction with no cross-ray communication. There is no reduction tree, no
 atomics, no synchronisation until the per-candidate residual at the very end.
 
-Occupancy is therefore not the problem; **memory divergence is**. Neighbouring
-rays at long range land 63 m apart and walk in different directions, so the
-gather scatters across the tile. Ordering the march so that a warp/wavefront
-holds *adjacent ranges on one ray* rather than *one range across many rays*
-keeps each fetch group inside a cache line. This is a layout decision, and on
-the measured 97 %/3 % split it is the decision that sets the achieved rate.
+Occupancy is therefore not the problem; **memory divergence is**.
+
+**Order the march so a warp holds ADJACENT AZIMUTHS AT ONE RANGE**, not adjacent
+ranges on one ray. An earlier revision of this document said the opposite; it was
+reasoned, not measured, and the measurement reverses it. Counting the distinct
+memory granules a 32-sample warp touches over all four bilinear taps, on the real
+fine-pass index arrays:
+
+| ordering | 32 B sectors / warp (360° mean) | ≈ bytes/sample |
+|---|---|---|
+| ray-major (adjacent ranges on one ray) | 70.0 | ~70 B |
+| **range-major (adjacent azimuths, one range)** | **29.2** | **~29 B** |
+| address-sorted, unreachable ideal | 7.2 | ~7 B |
+| uniformly shuffled | 72.0 | ~72 B |
+
+Range-major wins at all 19 azimuths sampled — 4.72× at due N/S, 1.54× at due
+E/W, **2.40× averaged over a full fan**. The damning row is the last one:
+ray-major at az 0° and 45° scores 72.00 against a random shuffle's 71.97, so the
+ordering previously recommended here is indistinguishable from random access.
+
+The mechanism is the one the old text had inverted. Azimuth neighbours
+**converge** toward the camera — their spacing is `d · az_step`, 1.4 m at 1 km
+and 63 m at 45 km — while range neighbours stay a fixed 150 m apart at every
+range. So range-major locality is best exactly where the early-out (§4) keeps
+most of the samples: the near field. Per range band, due north, 32 B sectors per
+warp: 0.1–1 km 13.9 ray / **2.8** range; 3–8 km 72.0 / **6.2**; 8–20 km 72.0 /
+**11.5**.
+
+Two caveats on this. The claim above is an exact transaction count on the real
+index arrays, **not** a GPU timing — there is no GPU in this environment. And on
+*this CPU* the change is worth only 2–23%, because (see §1) the fetch is under a
+fifth of `dem.elevation`; the traffic saving is real but numpy overhead hides it.
+`render_skyline` currently builds its grid with `meshgrid(indexing='ij')`, i.e.
+ray-major, the worse order — harmless here, wrong on a GPU.
+
+The second correction is smaller and geometric: at 46.5 °N an SRTM 1-arcsec post
+is 30.9 m N–S but only **21.3 m E–W**, because the posting is 1 arcsec in
+longitude too. Anything reasoning about "how many posts apart" has to carry the
+`cos(latitude)`.
 
 ## 7. Latency budget, and the honest part
 

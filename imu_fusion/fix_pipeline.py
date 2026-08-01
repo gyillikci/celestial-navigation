@@ -46,7 +46,7 @@ import numpy as np
 
 from .landfall import K_REFRACTION, effective_radius_km
 from .resection_geometry import distance_km, image_ray_angles
-from .terrain_resection import render_skyline
+from .terrain_resection import render_skyline, render_skyline_early
 
 
 # --------------------------------------------------------------------------- #
@@ -220,14 +220,23 @@ def score_candidate(dem, lat, lon, obs: SkylineObservation, prior: SearchPrior,
         never appears as a grid axis.  `ground_m` feeds the AGL eye mode; the
         absolute mode ignores it.
     '''
-    azs, prof = render_skyline(
-        dem, lat, lon, obs.cam_height_m(ground_m if ground_m is not None
-                                        else 0.0),
+    common = dict(
         az_start=az_window[0], az_end=az_window[1],
         az_step=grid.az_step_deg, d_min_km=grid.d_min_km,
         d_max_km=grid.d_max_km, d_step_km=grid.d_step_km,
-        k=obs.k, water_level_m=grid.water_level_m,
-        visibility_km=grid.visibility_km)
+        k=obs.k, water_level_m=grid.water_level_m)
+    cam = obs.cam_height_m(ground_m if ground_m is not None else 0.0)
+    # The early-out is EXACT (bit-identical profile, 1.5-5.9x less work), but it
+    # cannot represent extinction: a near sample can be invisible while a far one
+    # is not, so "best so far" stops being monotone and the max-pyramid bound
+    # stops bounding.  Take it whenever visibility is off and the DEM can supply
+    # the bound; otherwise march in full.  This is a speed choice only -- both
+    # branches return the same numbers.
+    if grid.visibility_km is None and hasattr(dem, "max_elevation"):
+        azs, prof = render_skyline_early(dem, lat, lon, cam, **common)
+    else:
+        azs, prof = render_skyline(dem, lat, lon, cam,
+                                   visibility_km=grid.visibility_km, **common)
     hd = prior.headings()
     free_pitch = obs.pitch_mode == "free"
     best = None

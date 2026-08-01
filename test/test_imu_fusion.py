@@ -2383,6 +2383,34 @@ class TestRenderEarlyOut(unittest.TestCase):
         _, early = render_skyline_early(dem, 37.0, 27.35, 25.0, **kw)
         self.assertTrue(np.array_equal(full, early))
 
+    def test_solver_path_takes_the_early_out_and_gets_the_same_answer(self):
+        """The optimisation is worthless if the shipped pipeline never reaches
+        it -- `fix_pipeline.score_candidate` called plain `render_skyline` until
+        this was wired.  Both branches must return the identical candidate score,
+        because the choice between them is about speed and nothing else."""
+        import numpy as np
+        from imu_fusion import fix_pipeline as fp
+        from imu_fusion.terrain_resection import render_skyline
+        dem = self._dem()
+        obs = fp.SkylineObservation(
+            columns=np.linspace(0, 1023, 64), rows=np.linspace(500, 520, 64),
+            f_px=1400.0, cx=511.5, cy=383.5, pitch_deg=0.0)
+        prior = fp.SearchPrior(lat=37.0, lon=27.35, heading_deg=45.0,
+                               heading_slack_deg=(-8.0, 8.0), box_lat_km=1.0,
+                               box_lon_km=1.0, cell_km=1.0)
+        grid = fp.RenderGrid(az_step_deg=0.5, d_step_km=0.2, d_max_km=30.0,
+                             d_min_km=0.2)
+        win = fp._render_window(obs, prior)
+        got = fp.score_candidate(dem, 37.0, 27.35, obs, prior, grid, win,
+                                 ground_m=0.0)
+        # force the slow branch by hiding the pyramid the early-out needs
+        class NoPyramid:
+            def __init__(self, d): self._d = d
+            def elevation(self, la, lo): return self._d.elevation(la, lo)
+        want = fp.score_candidate(NoPyramid(dem), 37.0, 27.35, obs, prior, grid,
+                                  win, ground_m=0.0)
+        self.assertEqual(got, want)
+
     def test_visibility_is_refused_rather_than_silently_wrong(self):
         """Extinction can hide a NEAR sample and leave a FAR one visible, so
         'best so far' stops being monotone and the bound stops bounding.  The
