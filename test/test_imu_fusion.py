@@ -2271,6 +2271,234 @@ class TestRegionExtractorCollapse(unittest.TestCase):
         self.assertGreater(float(np.mean(np.abs(flat - truth) > 60.0)), 0.25)
 
 
+class TestRenderEarlyOut(unittest.TestCase):
+    """The accelerator optimisation, and the two ways it can silently be wrong.
+
+    `render_skyline_early` skips the tail of each ray once a max-pyramid bound
+    says nothing out there can beat the best angle found so far.  Measured on
+    real Alpine tiles it saves 68-99% of the range march at 1.5-5.9x wall clock.
+    It is only worth having if it is EXACT, so these tests attack the bound
+    rather than the speedup: an early-out that is usually right is worthless,
+    because "usually" means a missing far-field peak nobody notices.
+    """
+
+    HILLS = [(37.05, 27.30, 700.0, 0.03), (37.12, 27.45, 420.0, 0.05),
+             (36.95, 27.20, 900.0, 0.04), (37.20, 27.10, 300.0, 0.02)]
+
+    def _dem(self):
+        from imu_fusion.terrain_resection import SyntheticDem
+        return SyntheticDem(self.HILLS)
+
+    def test_matches_the_full_march_exactly(self):
+        """Across camera heights that move the skyline from far to near, and so
+        move how much of the march is skippable."""
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline, render_skyline_early
+        dem = self._dem()
+        kw = dict(az_step=0.5, d_step_km=0.2, d_max_km=40.0, d_min_km=0.2)
+        for cam in (60.0, 300.0, 1200.0):
+            _, full = render_skyline(dem, 37.0, 27.35, cam, **kw)
+            _, early = render_skyline_early(dem, 37.0, 27.35, cam, **kw)
+            self.assertTrue(np.array_equal(full, early),
+                            "cam=%g: max diff %g deg"
+                            % (cam, float(np.abs(full - early).max())))
+
+    def test_exact_on_rough_gridded_terrain(self):
+        """The test that actually earns its keep.
+
+        The Gaussian-hill checks above pass even with the pyramid's 3x3
+        dilation removed -- smooth analytic terrain simply never exercises the
+        failure, which is precisely what `SyntheticDem`'s own docstring warns
+        about.  The bug is geometric: a ray can CLIP THE CORNER of a pyramid
+        cell between two probe points, so an undilated bound never sees the
+        peak in it.  It needs rough terrain at the cell scale to appear.
+
+        Writing a real (small) .hgt and reading it through `DemTiles` also means
+        this exercises `max_tile`, which the SyntheticDem path bypasses.
+
+        Measured: removing the dilation breaks 6 of these 8 configurations by
+        0.4-8.5 arcmin, and reproduces the 1.2' / 11.1' failures first seen on
+        real Alpine tiles.
+        """
+        import tempfile
+        import numpy as np
+        from imu_fusion.terrain_resection import (DemTiles, render_skyline,
+                                                  render_skyline_early)
+        d = tempfile.mkdtemp()
+        side = 361
+        rng = np.random.default_rng(11)
+        a = rng.random((side, side)) * 900.0
+        yy, xx = np.mgrid[0:side, 0:side]
+        a = a + 600.0 * np.exp(-((yy - 140.) ** 2 + (xx - 200.) ** 2) / (2 * 8. ** 2))
+        a = a + 1800.0 * np.exp(-((yy - 60.) ** 2) / (2 * 5. ** 2))
+        a.astype(">i2").tofile(os.path.join(d, "N37E027.hgt"))
+        dem = DemTiles(d)
+        kw = dict(az_step=0.3, d_step_km=0.15, d_min_km=0.3, d_max_km=40.0)
+        for cam in (1200.0, 1500.0, 1800.0, 2200.0):
+            for la, lo in ((37.5, 27.5), (37.3, 27.7)):
+                _, full = render_skyline(dem, la, lo, cam, **kw)
+                # pool=2 puts the pyramid cell within a few probe steps, the
+                # same cell-to-probe ratio the real 1-arcsec tiles have
+                _, early = render_skyline_early(dem, la, lo, cam, pool=2, **kw)
+                self.assertTrue(
+                    np.array_equal(full, early),
+                    "cam=%g at %.1f,%.1f: %.4f arcmin"
+                    % (cam, la, lo, float(np.abs(full - early).max()) * 60.0))
+
+    def test_bound_is_an_upper_bound_on_the_terrain(self):
+        """The whole correctness argument reduces to this: the pyramid may
+        never sit below the DEM it bounds.  A mean-pooled pyramid -- what a GPU
+        mip chain builds by default -- would fail here."""
+        import numpy as np
+        dem = self._dem()
+        rng = random.Random(7)
+        la = np.array([36.9 + 0.4 * rng.random() for _ in range(400)])
+        lo = np.array([27.0 + 0.5 * rng.random() for _ in range(400)])
+        self.assertTrue(np.all(dem.max_elevation(la, lo) >= dem.elevation(la, lo) - 1e-9))
+
+    def test_far_peak_beyond_a_near_ridge_is_not_skipped(self):
+        """The failure this optimisation invites: a modest near ridge sets a
+        'best so far' that a loose bound reads as final, and a taller distant
+        summit past it is never marched.  The near ridge is deliberately closer
+        AND lower than the far one."""
+        import numpy as np
+        from imu_fusion.terrain_resection import (SyntheticDem, render_skyline,
+                                                  render_skyline_early)
+        dem = SyntheticDem([(37.02, 27.35, 120.0, 0.004),    # near, low
+                            (37.30, 27.35, 2600.0, 0.02)])   # far, tall
+        kw = dict(az_start=0.0, az_end=6.0, az_step=0.25, d_step_km=0.1,
+                  d_min_km=0.2, d_max_km=40.0)
+        _, full = render_skyline(dem, 37.0, 27.35, 30.0, **kw)
+        _, early = render_skyline_early(dem, 37.0, 27.35, 30.0, **kw)
+        self.assertTrue(np.array_equal(full, early))
+        self.assertGreater(float(full.max()), 1.0)           # far summit is IN
+
+    def test_water_level_and_clamp_survive_the_early_out(self):
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline, render_skyline_early
+        dem = self._dem()
+        kw = dict(az_step=0.5, d_step_km=0.2, d_max_km=40.0, d_min_km=0.2,
+                  water_level_m=0.0)
+        _, full = render_skyline(dem, 37.0, 27.35, 25.0, **kw)
+        _, early = render_skyline_early(dem, 37.0, 27.35, 25.0, **kw)
+        self.assertTrue(np.array_equal(full, early))
+
+    def test_visibility_is_refused_rather_than_silently_wrong(self):
+        """Extinction can hide a NEAR sample and leave a FAR one visible, so
+        'best so far' stops being monotone and the bound stops bounding.  The
+        function must not accept the argument at all."""
+        from imu_fusion.terrain_resection import render_skyline_early
+        with self.assertRaises(TypeError):
+            render_skyline_early(self._dem(), 37.0, 27.35, 100.0,
+                                 visibility_km=20.0)
+
+
+class TestExtractionQuality(unittest.TestCase):
+    """The gate that runs BEFORE the solver, with no ground truth available.
+
+    `TestRegionExtractorCollapse` establishes that a collapsed extraction is
+    invisible to distance-to-truth metrics.  In production there is no truth to
+    measure against at all -- only the photograph -- so the gate has to reach
+    its verdict from the image and the row vector alone.  These tests pin the
+    failure modes it must catch and, just as importantly, the good extraction
+    it must not reject.
+    """
+
+    @staticmethod
+    def _scene(width=320, height=240, amp=30.0, sky=210.0, gnd=60.0):
+        """Bright sky over dark terrain, boundary a smooth sinusoidal ridge."""
+        import numpy as np
+        rows = height * 0.45 + amp * np.sin(np.linspace(0.0, 4.0, width))
+        yy = np.arange(height)[:, None]
+        img = np.where(yy < rows[None, :], sky, gnd).astype(float)
+        return img, rows
+
+    def test_good_extraction_passes(self):
+        from imu_fusion.extraction_quality import assess
+        img, rows = self._scene()
+        m = assess(img, rows)
+        self.assertTrue(m["ok"], m["reasons"])
+        self.assertGreater(m["row_std_px"], 2.0)
+        self.assertGreater(m["contrast"], 1.5)
+
+    def test_flat_collapse_is_rejected(self):
+        """The CH1 failure: a constant row through the frame interior, which
+        no distance metric and no edge-pinning guard could see."""
+        import numpy as np
+        from imu_fusion.extraction_quality import assess
+        img, rows = self._scene()
+        flat = np.full_like(rows, float(np.median(rows)))
+        m = assess(img, flat)
+        self.assertFalse(m["ok"])
+        self.assertTrue(any("flat" in r for r in m["reasons"]), m["reasons"])
+
+    def test_path_without_image_evidence_is_rejected(self):
+        """A path drawn across uniform sky has shape but no step response, so
+        it cannot be a sky/terrain boundary however plausible it looks."""
+        import numpy as np
+        from imu_fusion.extraction_quality import assess
+        img, rows = self._scene()
+        sky_only = np.full_like(img, 200.0)
+        m = assess(sky_only, rows)
+        self.assertFalse(m["ok"])
+        self.assertTrue(any("evidence" in r for r in m["reasons"]), m["reasons"])
+
+    def test_pinning_to_the_search_band_is_rejected(self):
+        import numpy as np
+        from imu_fusion.extraction_quality import assess
+        img, rows = self._scene()
+        W = img.shape[1]
+        lo = np.full(W, 100.0)
+        hi = np.full(W, 180.0)
+        pinned = np.full(W, 100.0)
+        m = assess(img, pinned, y_band=(lo, hi))
+        self.assertFalse(m["ok"])
+        self.assertGreater(m["edge_frac"], 0.5)
+
+    def test_missing_columns_are_rejected_before_other_checks(self):
+        import numpy as np
+        from imu_fusion.extraction_quality import assess
+        img, rows = self._scene()
+        holes = rows.copy()
+        holes[: int(0.7 * len(holes))] = np.nan
+        m = assess(img, holes)
+        self.assertFalse(m["ok"])
+        self.assertLess(m["valid_frac"], 0.6)
+
+    def test_step_response_sign_follows_the_scene(self):
+        """Sky-above-terrain gives a positive step; inverting the scene must
+        flip it, so the check keys on |step| and not on a hard-coded polarity."""
+        import numpy as np
+        from imu_fusion.extraction_quality import _step_response, assess
+        img, rows = self._scene()
+        self.assertGreater(float(np.median(_step_response(img, rows))), 0.0)
+        inverted = 255.0 - img
+        self.assertLess(float(np.median(_step_response(inverted, rows))), 0.0)
+        self.assertTrue(assess(inverted, rows)["ok"])
+
+    def test_span_is_the_angle_subtended_by_the_relief(self):
+        """The extraction-side twin of geometric sensitivity: a clean skyline
+        with no vertical relief carries no position information."""
+        import numpy as np
+        from imu_fusion.extraction_quality import usable_span_deg
+        f = 1000.0
+        rows = np.concatenate([np.full(100, 300.0), np.full(100, 400.0)])
+        got = usable_span_deg(rows, f)
+        self.assertAlmostEqual(got, math.degrees(math.atan(100.0 / f)), places=6)
+        self.assertLess(usable_span_deg(np.full(200, 350.0), f), 1e-9)
+
+    def test_gate_never_sees_ground_truth(self):
+        """A structural guarantee, not a numeric one: `assess` takes only the
+        image and the extracted rows, so it cannot accidentally be graded
+        against a mask the way the CH1 benchmark was."""
+        import inspect
+        from imu_fusion.extraction_quality import assess
+        params = list(inspect.signature(assess).parameters)
+        self.assertEqual(params[:2], ["image", "rows"])
+        for forbidden in ("truth", "mask", "gt", "reference"):
+            self.assertNotIn(forbidden, params)
+
+
 class TestSyntheticScene(unittest.TestCase):
     """The generator must be exactly consistent with the solver's model."""
 
