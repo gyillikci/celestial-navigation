@@ -2609,11 +2609,10 @@ for 100% of columns** — total failure, not partial.
 
 **A hybrid (0.5 region + 0.5 local edge) helps but doesn't fix the collapse**
 (worst case still 296 px, because a pinned region term still outvotes the edge
-term almost everywhere). The working fix is a **guard on the symptom, not a
-smarter model**: a real skyline essentially never hugs a frame edge across the
-whole width, so if more than 60% of columns sit within 4 px of the search
-band's edge, the region term is untrusted and the pure local-edge extractor
-takes over.
+term almost everywhere). The working fix looked like a **guard on the symptom**:
+a real skyline essentially never hugs a frame edge across the whole width, so if
+more than 60% of columns sit within 4 px of the search band's edge, the region
+term is untrusted and the pure local-edge extractor takes over.
 
 | | DP | region | hybrid | **guarded** |
 |---|---|---|---|---|
@@ -2623,25 +2622,85 @@ takes over.
 
 ![extractor comparison](results/fig_ch1_extractor_compare.png)
 
-**A bug the test suite caught on the way, worth stating plainly.** The first
-version of `region_cost` normalised to [0,1] per column, and `extract`'s
-default `jump_penalty=1.0` — borrowed from `skyline_dp`'s raw-cost scale — is
-5–50× too large for that range: on a clean synthetic boundary the path
-over-smoothed into a **flat compromise line**, ignoring real local variation
-entirely (verified: the extracted row was numerically *identical* across all
-120 columns). The synthetic test happened to still pass its distance threshold
-by coincidence (the flat line was near the boundary's median), which is exactly
-why the earlier `masks[i].argmax(axis=0)` truth bug in the same test — always
-returning 0 because sky is `True` starting at row 0 — went unnoticed until
-fixed. Both are now corrected and covered; the flattening tendency itself is a
-known scale-sensitivity of the region cost, worth remembering before trusting
-`jump_penalty` values carried over from the local-cost module.
+Those four numbers are reproducible bit-for-bit and are not in question. What
+they hide is.
 
-**Honest scope.** Not reimplemented: their dehazing-steered smoothness term
-and interactive correction strokes — the paper is explicit these exist, and
-the CH1 evidence says the *data term* is what mattered here, not the
-smoothness term. Position-solve validation of the guarded extractor (does the
-46→49.5 px extraction gain survive into a smaller final-fix error?) is a
-natural next step, not yet run.
+**RETRACTED: "guarded" beating DP on 7/10 scenes is mostly the SAME flattening
+bug this section already caught once, undetected on the real photos because the
+median-error metric can't tell "tracks the skyline" from "flat guess near its
+median."** Checking `extract_guarded`'s own output variance across the 10 test
+scenes — not just its distance from truth — shows **7 of 10 outputs are a
+single constant value** (`std < 1 px`, sometimes a literal one-element
+`np.unique`). The edge-pinning guard added below never fires, because these
+collapses land in the *interior* of the frame, not at the search band's edge —
+a second collapse mode the guard was never built to catch.
 
-135 new lines of module, 5 new tests, 153 total green.
+![CH1 collapse, honestly shown](results/fig_ch1_collapse_honest.png)
+
+On the pictured scene the flat guess scores 27 px median error — genuinely
+better than DP's 120 px — while 30% of its columns are off by more than 60 px.
+The median is flattered by coincidence: a flat line sitting near the true
+skyline's central tendency beats an extractor that is *confidently and
+consistently* wrong in one direction (DP locking onto a nearer, brighter false
+ridge), even though neither has found the real boundary shape.
+
+**Position-solve validation — now actually run, and it is worse than a wash.**
+Two scenes, the solver's own coarse-to-fine pipeline, mask/DP/guarded skylines
+fed through identically:
+
+| scene | mask (near-oracle) | DP-fed | guarded-fed |
+|---|---|---|---|
+| 04032011388 | 38 m | 8112 m | 8112 m (same wrong cell) |
+| 2011-10-04_14.31.44 | 9432 m | **2864 m**, rms 77.86′ | **11 330 m**, rms **6.58′** |
+
+On the second scene the flat, information-free skyline produces the
+**best-looking residual of the three and the worst position** — 6.58′, half an
+order of magnitude tighter-looking than DP's honest 77.86′, at a site 4× farther
+from the truth. A flat elevation curve is trivially consistent with any DEM
+render that has a wide plateau near the right height, so it finds one
+confidently, at the wrong place. This is not a new phenomenon in this project —
+it is the identical shape as the ultrawide's railed-heading false minima and the
+in-car frames' 1.0× separations — but it is a clean demonstration on a
+completely independent dataset that a **residual number alone, from any
+extractor, is not evidence of a real fix.** The separation metric would flag
+this cell the same way it flagged those; a solver that trusted rms alone would
+not.
+
+**A bug the test suite caught on the way, worth stating plainly — and the one
+that explains the above.** The first version of `region_cost` normalised to
+[0,1] per column, and `extract`'s default `jump_penalty=1.0` — borrowed from
+`skyline_dp`'s raw-cost scale — is 5–50× too large for that range: on a clean
+synthetic boundary the path over-smoothed into a **flat compromise line**,
+ignoring real local variation entirely (verified: the extracted row was
+numerically *identical* across all 120 columns). The synthetic test happened to
+still pass its distance threshold by coincidence (the flat line was near the
+boundary's median) — precisely the same coincidence that let 7 of 10 real
+scenes look like wins above. The truth-extraction bug in the same test (always
+returning row 0) is fixed and covered; the *flattening tendency itself was
+recorded as "worth remembering" but never checked against the real-photo
+benchmark it had already contaminated*, which is the retraction this section
+now makes.
+
+**Why here and not on this project's own iPhone photos**: those frames are
+clear-sky coastal or lit differently, so a colour+gradient sky/ground model
+separates cleanly; CH1's alpine haze and snow-against-cloud scenes are close to
+worst case for a data term with no depth or dehazing signal. That gap is exactly
+their **omitted dehazing-steered smoothness term** — the one part of the paper
+explicitly not reimplemented, and, on this evidence, the part doing the real
+work of keeping their region cost from flattening in exactly these conditions.
+
+**Honest scope, revised.** Not reimplemented: their dehazing-steered smoothness
+term and interactive correction strokes. The CH1 evidence no longer says the
+data term alone is sufficient — it says the data term without their smoothness
+term collapses on hazy alpine scenes often enough (7/10 here) that its
+pixel-error "wins" cannot be trusted without checking output variance, and that
+even a fixed collapse guard needs to detect interior flattening, not only
+edge-pinning. **Recommendation: keep `skyline_dp` as the default extractor for
+the real pipeline; `skyline_region`'s guarded mode is not validated for
+production use and should not be selected without an output-variance check at
+minimum.**
+
+135 new lines of module, 5 new tests, 153 total green — correct code, over-read
+result. The module and its tests are sound (they test the mechanism, not the
+CH1 win rate); the retraction is about what the benchmark table was allowed to
+imply.

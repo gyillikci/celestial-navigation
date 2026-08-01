@@ -2229,6 +2229,48 @@ class TestFixPipeline(unittest.TestCase):
             solve_fix(dem, obs, prior, fine=self._grid())
 
 
+class TestRegionExtractorCollapse(unittest.TestCase):
+    """The flat-line collapse that contaminated the CH1 benchmark.
+
+    `region_cost` can produce a cumulative sum with no usable interior
+    structure; the path then degenerates to a CONSTANT row.  Measured on CH1:
+    7 of 10 real scenes, undetected because median pixel error cannot tell a
+    flat guess near the truth's central tendency from a real track, and because
+    `extract_guarded`'s edge-pinning guard only fires when the collapse lands
+    at the search band's edge -- these landed in the frame INTERIOR.
+
+    A collapsed extraction is worse than a bad one: fed to the solver it scored
+    the BEST residual (6.58') at the WORST position (11.3 km), because a flat
+    elevation curve is trivially consistent with any wide DEM plateau.
+    """
+
+    def test_flat_output_is_detectable_by_variance(self):
+        """The check that should have run on the benchmark: a real skyline has
+        vertical structure, so near-zero output variance means collapse
+        regardless of how good the distance-to-truth metric looks."""
+        import numpy as np
+        flat = np.full(300, 412.0)
+        real = 400.0 + 40.0 * np.sin(np.linspace(0, 3.0, 300))
+        self.assertLess(float(flat.std()), 1.0)
+        self.assertGreater(float(real.std()), 1.0)
+        self.assertEqual(len(np.unique(flat)), 1)
+
+    def test_median_error_cannot_distinguish_collapse(self):
+        """Why the metric hid it: against a sloped truth, a constant line at the
+        truth's median can beat a structured-but-biased extraction on median
+        error while carrying no shape information at all."""
+        import numpy as np
+        truth = np.linspace(360.0, 550.0, 400)
+        flat = np.full(400, float(np.median(truth)))
+        biased = truth - 120.0
+        med_flat = float(np.median(np.abs(flat - truth)))
+        med_biased = float(np.median(np.abs(biased - truth)))
+        self.assertLess(med_flat, med_biased)        # flat "wins" the metric
+        self.assertEqual(float(flat.std()), 0.0)     # ...with zero information
+        # and a large fraction of its columns are badly wrong
+        self.assertGreater(float(np.mean(np.abs(flat - truth) > 60.0)), 0.25)
+
+
 class TestSyntheticScene(unittest.TestCase):
     """The generator must be exactly consistent with the solver's model."""
 
