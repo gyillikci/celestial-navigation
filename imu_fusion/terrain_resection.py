@@ -406,7 +406,7 @@ def render_skyline_early(dem, lat: float, lon: float, cam_height_m: float,
                          k: float = K_REFRACTION, water_level_m: float = None,
                          clamp_water_horizon: bool = True,
                          pool: int = 32, block_km: float = 3.0,
-                         probe_km: float = 0.3):
+                         probe_km: float = 0.3, probe_az_stride: int = 8):
     ''' `render_skyline` with an EXACT early-out.  Same answer, a fraction of
         the DEM gathers.
 
@@ -450,14 +450,30 @@ def render_skyline_early(dem, lat: float, lon: float, cam_height_m: float,
 
     # --- bound table: max terrain beyond each probe range, per azimuth ------
     bd = np.arange(d_min_km, d_max_km + probe_km, probe_km)
-    Hb = dem.max_elevation(lat + bd[None, :] * ca[:, None] * _DEG_PER_KM_LAT,
-                           lon + bd[None, :] * sa[:, None] * dlon_per_km, pool)
+    # The bound is read out of a pyramid whose cells are ~0.7-1.0 km across, so
+    # probing it at the march's own azimuth step is wasted work: at 45 km
+    # adjacent rays are 63 m apart, 10-15x finer than the bound can resolve.
+    # Probe every `stride`-th azimuth instead, capped so the LATERAL GAP between
+    # neighbouring probe rays at d_max stays under half a pyramid cell -- beyond
+    # that, terrain could sit between two probe rays in a cell neither touches,
+    # and the bound would stop bounding.  The cap is what keeps this exact; the
+    # parameter only lowers it.
+    gap_km = radians(az_step) * d_max_km
+    stride = max(1, min(int(probe_az_stride), int(0.5 / gap_km) if gap_km > 0 else 1))
+    pidx = np.arange(0, len(azs), stride)
+    Hb = dem.max_elevation(
+        lat + bd[None, :] * ca[pidx][:, None] * _DEG_PER_KM_LAT,
+        lon + bd[None, :] * sa[pidx][:, None] * dlon_per_km, pool)
     if water_level_m is not None:
         Hb = np.maximum(Hb, float(water_level_m))
     S = np.maximum.accumulate(Hb[:, ::-1], axis=1)[:, ::-1]
+    if len(pidx) > 2:                     # margin for rays between probe rays
+        S = np.maximum(S, np.maximum(np.roll(S, 1, axis=0), np.roll(S, -1, axis=0)))
     dh = S - cam_height_m
     opt = np.degrees(np.where(dh > 0.0, dh / bd[None, :], dh / d_max_km) / 1000.0
                      - bd[None, :] / (2.0 * R_eff))
+    # every march azimuth reads the probe row of its own bin
+    probe_of = np.minimum(np.arange(len(azs)) // stride, len(pidx) - 1)
 
     # --- blocked march, dropping rays as their bound falls below their best -
     best = np.full(len(azs), -np.inf)
@@ -480,7 +496,7 @@ def render_skyline_early(dem, lat: float, lon: float, cam_height_m: float,
         # samples between d_end and it unbounded.  Reading low is conservative
         # (smaller divisor, less negative curvature term -> looser bound).
         j = max(0, int(np.searchsorted(bd, blk[-1], side="right")) - 1)
-        alive[idx] &= opt[idx, j] >= best[idx]
+        alive[idx] &= opt[probe_of[idx], j] >= best[idx]
 
     if water_level_m is not None and clamp_water_horizon:
         eye = cam_height_m - float(water_level_m)

@@ -149,15 +149,45 @@ below its own best-so-far.
 
 | case | full | early | speedup | max error |
 |---|---|---|---|---|
-| alpine high 46.55 N | 0.422 s | 0.118 s | **3.6×** | 0.0000′ |
-| alpine 46.02 N | 0.404 s | 0.199 s | **2.0×** | 0.0000′ |
-| valley 47.05 N | 0.432 s | 0.286 s | **1.5×** | 0.0000′ |
-| low camera 46.8 N | 0.707 s | 0.120 s | **5.9×** | 0.0000′ |
-| lake, water clamped 47.0 N | 0.319 s | 0.092 s | **3.5×** | 0.0000′ |
+| alpine high 46.55 N | 0.379 s | 0.049 s | **7.7×** | 0.0000′ |
+| alpine 46.02 N | 0.407 s | 0.115 s | **3.6×** | 0.0000′ |
+| valley 47.05 N | 0.421 s | 0.161 s | **2.6×** | 0.0000′ |
+| low camera 46.8 N | 0.391 s | 0.052 s | **7.5×** | 0.0000′ |
+| lake, water clamped 47.0 N | 0.326 s | 0.027 s | **11.9×** | 0.0000′ |
 
-Bit-identical output, 1.5–5.9× less work. The pyramid bound is looser than the
+Bit-identical output, 2.6–11.9× less work. The pyramid bound is looser than the
 exact ray suffix — a square block is not a ray — which is why the realised
 speedup is below the 68–99 % ceiling above.
+
+**Counting the probes, which a first version of this section did not.** The
+early-out is not free: it reads a bound table before it can skip anything, and
+those reads are DEM lookups too. Per photo (121 coarse + 14 fine candidates):
+
+| | bilinear gathers (26 MB tile) | pyramid probes (49 KB) |
+|---|---|---|
+| plain march | 35.1 M | 0 |
+| early-out, probe stride 1 | 10.5 M | **31.2 M** |
+| early-out, probe stride capped by geometry | 10.7 M | **12.2 M** |
+
+At stride 1 the probes cost three times the march they save, and by raw lookup
+count the early-out is a net **loss** (0.84×). It still won on wall clock only
+because a probe is a single nearest-neighbour read of a 49 KB array while a
+gather is four taps into 26 MB — measured 7.18 vs 3.89 M lookups/s, i.e. only
+1.85× cheaper, not free.
+
+The waste was that the probe table was built at the march's own azimuth step. At
+45 km adjacent rays are 63 m apart and a pyramid cell is 0.7–1.0 km, so the bound
+was being sampled 10–15× more finely than it can possibly resolve. Probing every
+`stride`-th azimuth fixes it — but `stride` **cannot be a free parameter**. It is
+capped so the lateral gap between neighbouring probe rays at `d_max` stays under
+half a pyramid cell; past that, terrain can sit between two probe rays in a cell
+neither touches. Removing the cap costs 144.6′. Note the cap runs opposite to
+intuition: a *coarse* azimuth step forces a *smaller* stride (2 for the coarse
+pass, 7 for the fine one), because the gap grows with the step.
+
+For an accelerator the distinction matters more than on CPU. The probes touch
+49 KB — L1/L2-resident, effectively zero DRAM traffic — so the number that sizes
+memory bandwidth is the **10.7 M bilinear gathers**, not the 22.9 M total.
 
 Note this is the same max-pooling that failed in §3. As a **bound** it is sound;
 as a **substitute for the data** it is not. The two uses are not in tension:
@@ -254,6 +284,35 @@ longitude too. Anything reasoning about "how many posts apart" has to carry the
 Per photo, on this CPU: extraction 118 ms, render ~10 s, scoring ~4 ms. Removing
 the render is the whole problem, and §4 alone takes 68–99 % of it before any
 hardware is involved.
+
+### Sizing a hardware-accelerated target (worked example: Jetson Orin NX)
+
+Combining §1, §4 and §6, one photo with a 25 km² box costs **10.7 M bilinear
+gathers** (after the early-out) at **~29 B/sample** if the march is ordered
+range-major — about **310 MB** of DRAM traffic. Against Orin NX's 102.4 GB/s
+LPDDR5 that is **~3 ms at peak, ~5 ms at 60 % achieved**. The other two ceilings
+are far away: ~15 FLOP/sample × 10.7 M ÷ ~1.9 TFLOPS fp32 ≈ 0.08 ms of
+arithmetic, and the 12.2 M pyramid probes touch 49 KB so they cost issue slots,
+not bandwidth.
+
+Order the march ray-major instead and the traffic is ~70 B/sample — 750 MB,
+7–12 ms. That is the whole practical consequence of §6.
+
+**The conclusion is an inversion, and it is the point of this section.** On this
+x86 box the render is 10 s and extraction is 118 ms — 99 % render. Put the render
+on the GPU and it becomes single-digit milliseconds while extraction, still on
+the CPU, stays in the 150–400 ms range. **Extraction becomes ~95 % of the
+latency.** Every profile taken on a workstation says "optimise the search"; the
+device says "optimise the extractor". Whoever ports this should port the DP
+extractor to C/NEON first and leave the renderer alone.
+
+Two things could still move this and are NOT established here: whether CUDA's
+hardware bilinear filtering (fixed-point filter weights) is precise enough given
+that fp16 *arithmetic* already costs 29′ (§2) — if not, the blend must be done
+manually in fp32, which raises the ALU term but not the bandwidth term, so the
+millisecond conclusion likely survives; and the power mode, since clocks and
+memory bandwidth both drop at 10 W. The bandwidth figures above are peak-derived
+with a single efficiency assumption, not measured on the part.
 
 What an accelerator cannot fix is that **the fix rate is not limited by compute**
 (see `RESULTS.md`): a 65 m grid produced no better answer than a 750 m grid, and

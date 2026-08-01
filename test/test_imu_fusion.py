@@ -2411,6 +2411,29 @@ class TestRenderEarlyOut(unittest.TestCase):
                                   win, ground_m=0.0)
         self.assertEqual(got, want)
 
+    def test_probe_stride_is_capped_by_geometry_not_by_the_caller(self):
+        """The probe table is read out of a pyramid with ~0.7-1.0 km cells, so
+        probing it at the march's own azimuth step is wasted work.  Striding is
+        only safe while the LATERAL GAP between neighbouring probe rays at d_max
+        stays under half a cell -- past that, terrain can sit between two probe
+        rays in a cell neither touches and the bound stops bounding.
+
+        So an over-large stride must be clamped, not honoured.  A coarse
+        azimuth step needs a SMALLER stride than a fine one, which is the
+        opposite of what "stride" intuitively suggests."""
+        import numpy as np
+        from imu_fusion.terrain_resection import render_skyline, render_skyline_early
+        dem = self._dem()
+        for az_step in (0.08, 0.3, 1.0):
+            kw = dict(az_step=az_step, d_step_km=0.2, d_min_km=0.2, d_max_km=40.0)
+            _, full = render_skyline(dem, 37.0, 27.35, 300.0, **kw)
+            # ask for an absurd stride; geometry must override it
+            _, early = render_skyline_early(dem, 37.0, 27.35, 300.0,
+                                            probe_az_stride=10_000, **kw)
+            self.assertTrue(np.array_equal(full, early),
+                            "az_step=%g: %.4f arcmin"
+                            % (az_step, float(np.abs(full - early).max()) * 60))
+
     def test_visibility_is_refused_rather_than_silently_wrong(self):
         """Extinction can hide a NEAR sample and leave a FAR one visible, so
         'best so far' stops being monotone and the bound stops bounding.  The
