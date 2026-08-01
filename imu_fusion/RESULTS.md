@@ -2704,3 +2704,107 @@ minimum.**
 result. The module and its tests are sound (they test the mechanism, not the
 CH1 win rate); the retraction is about what the benchmark table was allowed to
 imply.
+
+## Full CH1 sweep, DP-fed: 7% of photos yield a fix worth handing on
+
+All 203 CH1 photos, extraction through position, no ground truth anywhere in the
+loop. The GPS prior centres a 25 km² box but is deliberately displaced 1.2 km
+from truth (deterministic per photo), so "truth is inside the box" stays a real
+question rather than an artefact of centring. Truth is read exactly once, at the
+end, to score what the pipeline chose by itself.
+
+**Extraction failure: 0.0%.** `extraction_quality.assess` dropped none of the
+203. That number is honest and nearly useless on its own, and saying only that
+would be the same over-read this file just retracted. The gate catches
+*structural* failure — flat collapse, band pinning, no image evidence — and by
+construction it cannot see a confident boundary traced along the wrong edge.
+Measured against the curated masks afterwards, only **46% of extractions land
+within 30′ of truth**, and no self-assessable quantity predicts which: the best
+correlate is the extraction's own angular span at spearman **+0.44**, and the
+sign is *positive* — scenes with more vertical structure are harder to extract,
+not easier. So extraction quality is not knowable before the DEM is consulted,
+and the solver has to be the gate.
+
+It is. Separation earns its keep across the whole sweep:
+
+| gate | photos kept | median error | within 1 km |
+|---|---|---|---|
+| none | 203 (100%) | 1986 m | 22% |
+| sep ≥ 1.10 | 76 (37%) | 1750 m | 34% |
+| sep ≥ 1.20 | 32 (16%) | 431 m | 66% |
+| sep ≥ 1.30 | 19 (9%) | 343 m | 79% |
+| **sep ≥ 1.50** | **14 (7%)** | **250 m** | **93%** |
+
+spearman(separation, error) = −0.291 over all 203. rms is *anti*-predictive
+(+0.318): a lower residual means a worse fix, which is the flat-line pathology
+of `b492a93` visible at population scale.
+
+**The χ² search box was overconfident and is retracted.** The box built from
+cells within Δχ²=2.30 of the winner (68%, 2 dof, using `n_eff`) contained truth
+**42%** of the time, and *worse* for the photos that deserved it most — 47% at
+sep ≥ 1.30. The cause is not the statistics but the grid: the median box came
+out at 3.0 km², often a single 0.5 km cell whose half-diagonal is 354 m, while
+the fix itself was off by more than that. A region cannot contain what the point
+estimate misses, and refining the grid makes the box smaller and the containment
+worse.
+
+Empirical calibration instead, radius containing 90% of truth in each band:
+
+| band | n | median | r68 | r90 |
+|---|---|---|---|---|
+| 1.00–1.10 | 127 | 2262 m | 2996 m | 3716 m |
+| 1.10–1.20 | 44 | 1975 m | 2589 m | 3641 m |
+| 1.20–1.30 | 13 | 1150 m | 1865 m | 2574 m |
+| 1.30–1.50 | 5 | 1770 m | 1879 m | 2511 m |
+| **≥ 1.50** | **14** | **250 m** | **346 m** | **486 m** |
+
+The deliverable is therefore **14 photos (7%)** carrying a **0.95 km² box**
+(fix ± 486 m), which holds truth for **12 of 14** — 86% against a 90% target,
+on 14 samples, so the last digit is not real. Thirteen of the fourteen are
+within 522 m; the single escape (`IMG_5106`, 4202 m) is what a 7%-selective
+gate letting one through looks like, not a bug.
+
+Against the earlier `6c3916c` CH1 line (6/10 within 1 km, median 383 m): that
+benchmark was **mask-fed**, near-oracle. This one is **DP-fed**, the real
+pipeline. The gap between them is the cost of not having the curated mask, and
+it is the number that matters for deployment.
+
+### Multi-hypothesis extraction: the information is there, rms cannot find it
+
+If one extraction is unreliable, run four and let the residual choose. Tested on
+14 scenes with four DP parameterisations (the default plus loose, over-smoothed,
+and inverted-polarity), selection by the solver's own rms, truth used only to
+score the outcome:
+
+| selector | median error | within 1 km |
+|---|---|---|
+| default extraction only | 2413 m | 21% |
+| solver picks among 4, by rms | 2338 m | 21% |
+| oracle picks among 4 | **1102 m** | **43%** |
+
+The oracle halves the error, so the right boundary really is in the set — but
+rms-based selection captures none of it, while changing its mind on 13 of 14
+scenes. It reliably prefers the over-smoothed hypothesis, which scores a lower
+residual from a worse position for exactly the reason `b492a93` documented.
+
+**rms is not comparable across different extractions.** Within one extraction it
+ranks positions correctly, which is what the sweep relies on; across extractions
+it is comparing incommensurable quantities and rewards whichever boundary
+carries the least information. Any multi-hypothesis scheme must select on a
+dimensionless quantity — separation, or rms normalised by the extraction's own
+angular span — and this is worth building, because the oracle row says there is
+a factor of two waiting behind a correct selector.
+
+### Architecture, measured — see `EMBEDDED.md`
+
+The DEM gather is **97%** of a render and a render is ~100% of a fix: 35.0 M
+bilinear samples per photo. Three findings for the accelerator target, all
+measured:
+
+- **fp32 required, fp16 fatal** — 0.0038′ against 29.2′, the size of the signal.
+  fp16/int8 NPUs cannot run this kernel as written.
+- **The DEM cannot be decimated** at any range (19–59′ error). A skyline is an
+  extremum over a thin set, not a band-limited field.
+- **An exact early-out cuts the render 1.5–5.9×** — `render_skyline_early`, a
+  max-pyramid bound that drops each ray once nothing beyond it can win.
+  Bit-identical output on all 10 configurations checked.
