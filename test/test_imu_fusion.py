@@ -2271,6 +2271,74 @@ class TestRegionExtractorCollapse(unittest.TestCase):
         self.assertGreater(float(np.mean(np.abs(flat - truth) > 60.0)), 0.25)
 
 
+class TestCh1FailureTaxonomy(unittest.TestCase):
+    """Classifying HOW the extraction is wrong, not just how often.
+
+    Measured over all 203 CH1 photos: 49% FOREGROUND_LOCKON, 46% GOOD, 5%
+    PARTIAL, and zero SKY_LOCKON -- the failure is one coherent mode, which is
+    what makes a learned per-pixel cost worth building rather than a gamble.
+    These tests pin the sign convention and the class boundaries, because both
+    are easy to invert and an inverted one would reverse that conclusion.
+    """
+
+    def test_signed_error_is_positive_when_the_dp_sits_below_truth(self):
+        """The whole taxonomy hangs on this sign. Rows increase DOWNWARD, so a
+        DP row larger than the mask row means the DP chose something lower in
+        the frame -- nearer terrain -- and that must read POSITIVE."""
+        from imu_fusion.ch1_failure_taxonomy import signed_error_arcmin
+        e = signed_error_arcmin([400.0], [300.0], f_px=1000.0, height=768)
+        self.assertGreater(float(e[0]), 0.0)
+        e2 = signed_error_arcmin([300.0], [400.0], f_px=1000.0, height=768)
+        self.assertLess(float(e2[0]), 0.0)
+
+    def test_error_uses_real_angles_not_a_pixel_scale(self):
+        """CH1 focal lengths span 768-5547 px and the widest frames 67 deg, so
+        a constant arcmin-per-pixel would be wrong at the frame edge. The same
+        pixel offset must subtend LESS angle far from the principal point."""
+        import numpy as np
+        from imu_fusion.ch1_failure_taxonomy import signed_error_arcmin
+        centre = signed_error_arcmin([384.0], [364.0], f_px=800.0, height=768)
+        edge = signed_error_arcmin([100.0], [80.0], f_px=800.0, height=768)
+        self.assertGreater(abs(float(centre[0])), abs(float(edge[0])))
+
+    def test_classes_are_decided_in_the_documented_order(self):
+        import numpy as np
+        from imu_fusion.ch1_failure_taxonomy import classify
+        n = 100
+        self.assertEqual(classify(np.zeros(n))[0], 'GOOD')
+        self.assertEqual(classify(np.full(n, 90.0))[0], 'FOREGROUND_LOCKON')
+        self.assertEqual(classify(np.full(n, -90.0))[0], 'SKY_LOCKON')
+        half = np.concatenate([np.zeros(n // 3), np.full(n // 3, 90.0),
+                               np.full(n - 2 * (n // 3), -90.0)])
+        self.assertEqual(classify(half)[0], 'PARTIAL')
+        self.assertEqual(classify(np.zeros(4))[0], 'OTHER')   # too few columns
+
+    def test_mask_boundary_takes_the_topmost_ground_row(self):
+        import numpy as np
+        from imu_fusion.ch1_failure_taxonomy import mask_boundary
+        g = np.zeros((20, 4), bool)
+        g[10:, :] = True
+        g[5, 2] = True                       # a stray ground pixel above
+        rows, ntr = mask_boundary(g)
+        self.assertEqual(list(rows[:2]), [10.0, 10.0])
+        self.assertEqual(rows[2], 5.0)
+        self.assertEqual(int(ntr[2]), 3)     # the stray makes three transitions
+        empty = mask_boundary(np.zeros((20, 1), bool))[0]
+        self.assertTrue(np.isnan(empty[0]))
+
+    def test_truth_cost_rank_is_the_fraction_of_cheaper_rows(self):
+        """0.0 means the existing cost already puts the truth cheapest in its
+        column -- the discriminator between 'a re-weighted cost could find it'
+        and 'the truth carries no local evidence'. Measured 0.058 on the
+        foreground-lock-on class, i.e. the truth IS findable."""
+        import numpy as np
+        from imu_fusion.ch1_failure_taxonomy import truth_cost_rank
+        cost = np.array([[0.0], [1.0], [2.0], [3.0]])
+        self.assertAlmostEqual(float(truth_cost_rank(cost, [0])[0]), 0.00)
+        self.assertAlmostEqual(float(truth_cost_rank(cost, [3])[0]), 0.75)
+        self.assertTrue(np.isnan(truth_cost_rank(cost, [np.nan])[0]))
+
+
 class TestRenderEarlyOut(unittest.TestCase):
     """The accelerator optimisation, and the two ways it can silently be wrong.
 

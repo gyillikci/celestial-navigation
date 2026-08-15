@@ -2808,3 +2808,52 @@ measured:
 - **An exact early-out cuts the render 1.5–5.9×** — `render_skyline_early`, a
   max-pyramid bound that drops each ray once nothing beyond it can win.
   Bit-identical output on all 10 configurations checked.
+
+### The CH1 failure is ONE mode, and the truth is still findable
+
+"Only 46% of extractions land within 30′" is a count, not a diagnosis, and a
+count cannot choose a fix: it is equally consistent with one coherent bias a
+better data term would erase and with scattered ambiguity nothing can touch.
+`ch1_failure_taxonomy.py` measures which, over all 203 photos, against the
+curated masks (0 = sky, verified on all 203 rather than assumed, and the masks
+are clean — 0.000% of columns carry more than one transition).
+
+| class | photos | share |
+|---|---|---|
+| FOREGROUND_LOCKON — ≥60% of columns sit >30′ **below** the mask | 99 | **49%** |
+| GOOD — median error ≤30′ | 94 | 46% |
+| PARTIAL — right on ≥25% of the width, no dominant direction | 10 | 5% |
+| SKY_LOCKON | **0** | 0% |
+| OTHER | **0** | 0% |
+
+Essentially all of the failure is a single coherent mode: the extractor picks
+something **nearer and lower** than the true skyline. Nothing chose a cloud
+edge; nothing failed incoherently. The visual read on the failure gallery —
+trees, snow banks, grass, a chairlift cable — is what the numbers say too.
+
+The number that decides whether this is fixable is `rank_gt`, the percentile
+rank of the TRUE boundary's cost within its own column:
+
+| class | rank_gt (median) | step response at truth vs at DP's answer | shape corr |
+|---|---|---|---|
+| FOREGROUND_LOCKON | **0.058** | 28.2 vs 89.5 | 0.11 |
+| PARTIAL | 0.015 | 53.8 vs 69.9 | 0.62 |
+| GOOD | 0.006 | 69.8 vs 83.1 | 0.96 |
+
+On the failing half the true skyline already sits in the **cheapest 5.8% of rows
+in its column** — it is a real, locally detectable edge that simply loses to one
+about 3.2× stronger and nearer. It is not invisible, so this is exactly the
+failure a re-weighted per-pixel cost can fix; had `rank_gt` come out near 0.5 the
+opposite conclusion would follow and no amount of training data would help.
+
+The shape column is the other half of the story: at 0.11 the failing extractions
+retain essentially **no** shape relationship to the true skyline (against 0.96
+when they work), which is why the solver cannot recover from them and why the
+separation gate rejects them rather than mis-locating quietly.
+
+**What this settles for the model question.** The discriminating cue is not a
+better edge detector — the wrong edge is the stronger one. It is DEPTH: the true
+skyline is the farthest thing in its column. That argues for a learned per-pixel
+cost (or a monocular-depth prior) feeding the existing DP, keeping the geometry
+hand-written, rather than end-to-end segmentation trained on ~73–99 independent
+viewpoints.
